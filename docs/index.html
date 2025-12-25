@@ -717,6 +717,7 @@
     // ==========================================================================
     
     // Claims from Section 13.1 example in EDN format
+    // Note: Tag 58 wraps the KEY to mark the entire claim for redaction
     const SPEC_CLAIMS_EDN = `{
   / iss / 1: "https://issuer.example",
   / sub / 2: "https://device.example",
@@ -724,11 +725,11 @@
   / nbf / 5: 1725243900,
   / iat / 6: 1725244200,
   / most_recent_inspection_passed / 500: true,
-  / inspector_license_number / 501: 58("ABCD-123456"),
+  58(501): "ABCD-123456",
   / inspection_location / 503: {
     "country": "us",
-    "region": 58("ca"),
-    "postal_code": 58("94188")
+    58("region"): "ca",
+    58("postal_code"): "94188"
   }
 }`;
 
