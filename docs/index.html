@@ -983,12 +983,12 @@
     <div class="progress-bar">
       <div class="progress-step active" data-step="1" onclick="goToStep(1)">
         <div class="step-number"><span>1</span></div>
-        <div class="step-label">Holder Key</div>
+        <div class="step-label">Holder</div>
       </div>
       <div class="step-connector"></div>
       <div class="progress-step disabled" data-step="2" onclick="goToStep(2)">
         <div class="step-number"><span>2</span></div>
-        <div class="step-label">Issuer Key</div>
+        <div class="step-label">Issuer</div>
       </div>
       <div class="step-connector"></div>
       <div class="progress-step disabled" data-step="3" onclick="goToStep(3)">
@@ -998,7 +998,7 @@
       <div class="step-connector"></div>
       <div class="progress-step disabled" data-step="4" onclick="goToStep(4)">
         <div class="step-number"><span>4</span></div>
-        <div class="step-label">Present</div>
+        <div class="step-label">Disclose</div>
       </div>
       <div class="step-connector"></div>
       <div class="progress-step disabled" data-step="5" onclick="goToStep(5)">
@@ -1014,7 +1014,7 @@
           <div class="step-header-left">
             <div class="step-icon">1</div>
             <div>
-              <h2>Step 1: Holder Key</h2>
+              <h2>Holder</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Generate or load the holder's key pair</p>
             </div>
           </div>
@@ -1056,7 +1056,7 @@
           <div class="step-header-left">
             <div class="step-icon">2</div>
             <div>
-              <h2>Step 2: Issuer Key</h2>
+              <h2>Issuer</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Generate or load the issuer's key pair</p>
             </div>
           </div>
@@ -1098,7 +1098,7 @@
           <div class="step-header-left">
             <div class="step-icon">3</div>
             <div>
-              <h2>Step 3: Issue SD-CWT</h2>
+              <h2>Issue</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Create the selectively disclosable CWT</p>
             </div>
           </div>
@@ -1127,7 +1127,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="primary" onclick="issueCWTAndContinue()" id="step3Next">Issue SD-CWT</button>
+            <button class="primary" onclick="issueCWTAndContinue()" id="step3Next">Issue</button>
           </div>
         </div>
       </div>
@@ -1138,7 +1138,7 @@
           <div class="step-header-left">
             <div class="step-icon">4</div>
             <div>
-              <h2>Step 4: Create Presentation</h2>
+              <h2>Disclose</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Select disclosures and create a presentation</p>
             </div>
           </div>
@@ -1175,7 +1175,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="primary" onclick="createPresentationAndContinue()" id="step4Next">Create Presentation</button>
+            <button class="primary" onclick="createPresentationAndContinue()" id="step4Next">Present</button>
           </div>
         </div>
       </div>
@@ -1186,7 +1186,7 @@
           <div class="step-header-left">
             <div class="step-icon">5</div>
             <div>
-              <h2>Step 5: Verify Presentation</h2>
+              <h2>Verify</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Verify the presentation and view disclosed claims</p>
             </div>
           </div>
@@ -1224,7 +1224,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="primary" onclick="verifyPresentationAndFinish()" id="step5Next">Verify Presentation</button>
+            <button class="primary" onclick="verifyPresentationAndFinish()" id="step5Next">Verify</button>
           </div>
         </div>
       </div>
