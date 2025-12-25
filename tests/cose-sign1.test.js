@@ -526,8 +526,10 @@ describe('COSE Sign1 Module', () => {
       // Check custom protected header
       assert.strictEqual(protectedHeaders.get(-9999), 'custom-protected');
       
-      // Check kid (label 4)
-      assert.strictEqual(unprotectedHeaders.get(4), 'my-key-id');
+      // Check kid (label 4) - must be a Uint8Array (bstr in COSE)
+      const kidValue = unprotectedHeaders.get(4);
+      assert.ok(kidValue instanceof Uint8Array, 'kid must be a Uint8Array');
+      assert.deepStrictEqual(Buffer.from(kidValue), Buffer.from('my-key-id'));
       
       // Check custom unprotected header
       assert.strictEqual(unprotectedHeaders.get(-8888), 'custom-unprotected');
@@ -633,10 +635,10 @@ describe('COSE Sign1 Module', () => {
       const { unprotectedHeaders } = getHeaders(signed);
       
       assert.ok(unprotectedHeaders instanceof Map);
-      // kid may be returned as Buffer or string depending on encoding
+      // kid must be a Uint8Array (bstr in COSE)
       const kidValue = unprotectedHeaders.get(4);
-      const kidString = Buffer.isBuffer(kidValue) ? kidValue.toString() : kidValue;
-      assert.strictEqual(kidString, 'test-kid');
+      assert.ok(kidValue instanceof Uint8Array, 'kid must be a Uint8Array');
+      assert.deepStrictEqual(Buffer.from(kidValue), Buffer.from('test-kid'));
     });
 
     it('should throw for invalid input', () => {
@@ -651,7 +653,7 @@ describe('COSE Sign1 Module', () => {
       
       assert.throws(
         () => getHeaders(invalidCbor),
-        /Invalid COSE Sign1 structure/
+        /Invalid COSE.?Sign1 structure/
       );
     });
   });
