@@ -41,6 +41,14 @@ export const SimpleValue = {
  * SD-CWT Header Parameters
  */
 export const HeaderParam = {
+  /** alg: Algorithm */
+  Alg: 1,
+  /** kid: Key identifier */
+  Kid: 4,
+  /** kcwt: Key Binding CWT (contains the SD-CWT in SD-KBT) */
+  Kcwt: 13,
+  /** typ: Content type */
+  Typ: 16,
   /** sd_claims: Array of selectively disclosed claims */
   SdClaims: 17,
   /** sd_alg: Hash algorithm used for redaction */
@@ -49,6 +57,38 @@ export const HeaderParam = {
   SdAeadEncryptedClaims: 19,
   /** sd_aead */
   SdAead: 20,
+};
+
+/**
+ * CWT Claim Keys (from RFC 8392)
+ */
+export const ClaimKey = {
+  /** iss: Issuer */
+  Iss: 1,
+  /** sub: Subject */
+  Sub: 2,
+  /** aud: Audience */
+  Aud: 3,
+  /** exp: Expiration time */
+  Exp: 4,
+  /** nbf: Not before */
+  Nbf: 5,
+  /** iat: Issued at */
+  Iat: 6,
+  /** cti: CWT ID */
+  Cti: 7,
+  /** cnf: Confirmation (from RFC 8747) */
+  Cnf: 8,
+  /** cnonce: Client nonce */
+  Cnonce: 39,
+};
+
+/**
+ * Media types for SD-CWT
+ */
+export const MediaType = {
+  SdCwt: 'application/sd-cwt',
+  KbCwt: 'application/kb+cwt',
 };
 
 /**

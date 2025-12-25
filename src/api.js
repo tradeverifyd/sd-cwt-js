@@ -16,7 +16,7 @@ import * as coseSign1 from './cose-sign1.js';
 import * as sdCwt from './sd-cwt.js';
 
 // Re-export key utilities
-export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean } from './sd-cwt.js';
+export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean, ClaimKey, MediaType, HeaderParam } from './sd-cwt.js';
 export { generateKeyPair, Algorithm } from './cose-sign1.js';
 
 /**
@@ -29,13 +29,16 @@ export const Issuer = {
   /**
    * Creates a signed SD-CWT from claims with optional redactable values.
    * 
+   * Per spec Section 7: The payload MUST include a key confirmation element (cnf)
+   * for the Holder's public key. Either sub or redacted sub MUST be present.
+   * 
    * Claims can include:
    * - Regular claims: included directly in the token
    * - Redactable claims: wrapped with toBeRedacted(), stored as hashes with disclosures
    * - Decoys: wrapped with toBeDecoy(count), adds fake redacted entries
    * 
    * @param {Object} options - Issuance options
-   * @param {Map} options.claims - Claims map, may contain toBeRedacted() tagged keys/values
+   * @param {Map} options.claims - Claims map, MUST contain cnf (8) claim with holder's public key
    * @param {Object} options.privateKey - Issuer's private key {d, x, y}
    * @param {string} [options.algorithm='ES256'] - Signing algorithm
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm for redactions
@@ -46,8 +49,8 @@ export const Issuer = {
    * @example
    * const claims = new Map([
    *   [1, 'issuer.example'],                    // iss - public
+   *   [8, { 1: { 1: 2, -1: 1, -2: holderKey.x, -3: holderKey.y } }], // cnf - REQUIRED
    *   [toBeRedacted(500), 'sensitive-value'],   // redactable claim
-   *   [toBeDecoy(2), null],                     // add 2 decoys
    * ]);
    * 
    * const { token, disclosures } = await Issuer.issue({
@@ -60,6 +63,31 @@ export const Issuer = {
       throw new Error('Claims must be a Map');
     }
 
+    // Per spec Section 7: cnf (8) claim is REQUIRED and MUST NOT be redacted
+    // Check for cnf key (either plain or wrapped in toBeRedacted)
+    let hasCnf = false;
+    let cnfIsRedacted = false;
+    
+    for (const key of claims.keys()) {
+      if (key === sdCwt.ClaimKey.Cnf) {
+        hasCnf = true;
+        break;
+      }
+      if (sdCwt.isToBeRedacted(key) && sdCwt.getTagContents(key) === sdCwt.ClaimKey.Cnf) {
+        hasCnf = true;
+        cnfIsRedacted = true;
+        break;
+      }
+    }
+
+    if (!hasCnf) {
+      throw new Error('Claims MUST include cnf (8) claim with Holder\'s public key (per spec Section 7)');
+    }
+
+    if (cnfIsRedacted) {
+      throw new Error('cnf (8) claim MUST NOT be redacted (per spec Section 7)');
+    }
+
     // Process claims to handle toBeRedacted and toBeDecoy tags
     const { claims: processedClaims, disclosures } = sdCwt.processToBeRedacted(claims, { hashAlg: hashAlgorithm, strict });
 
@@ -68,6 +96,9 @@ export const Issuer = {
 
     // Build custom protected headers for SD-CWT
     const customProtectedHeaders = new Map();
+    
+    // Add typ header for SD-CWT
+    customProtectedHeaders.set(sdCwt.HeaderParam.Typ, sdCwt.MediaType.SdCwt);
     
     // Add sd_alg header if there are disclosures
     if (disclosures.length > 0) {
@@ -90,6 +121,7 @@ export const Issuer = {
  * 
  * Allows holders to select which disclosures to present,
  * enabling selective disclosure of claims.
+ * Per spec Section 8.1: Holder MUST create a Key Binding Token (SD-KBT) for every presentation.
  */
 export const Holder = {
   /**
@@ -147,31 +179,79 @@ export const Holder = {
   },
 
   /**
-   * Creates a presentation with selected disclosures.
+   * Creates a Key Binding Token (SD-KBT) presentation per spec Section 8.1.
    * 
-   * The presentation format is a CBOR array: [token, disclosures]
-   * where disclosures is an array of the selected disclosure byte strings.
+   * The SD-KBT is a COSE_Sign1 signed by the Holder's private key that:
+   * - Contains the SD-CWT (with disclosures) in the kcwt protected header
+   * - Has aud (audience) claim REQUIRED per spec
+   * - Has iat (issued at) claim REQUIRED per spec
+   * - Optionally includes cnonce (client nonce)
    * 
-   * @param {Buffer|Uint8Array} token - The original SD-CWT token
-   * @param {Uint8Array[]} selectedDisclosures - Disclosures to include
-   * @returns {Buffer} The presentation (CBOR-encoded)
+   * @param {Object} options - Presentation options
+   * @param {Buffer|Uint8Array} options.token - The original SD-CWT token
+   * @param {Uint8Array[]} options.selectedDisclosures - Disclosures to include
+   * @param {Object} options.holderPrivateKey - Holder's private key (matching cnf in SD-CWT)
+   * @param {string} options.audience - The intended verifier (aud claim) - REQUIRED
+   * @param {Uint8Array|Buffer} [options.nonce] - Optional nonce from verifier (cnonce claim)
+   * @param {string} [options.algorithm='ES256'] - Signing algorithm
+   * @returns {Promise<Buffer>} The signed SD-KBT presentation
    */
-  present(token, selectedDisclosures) {
-    // Ensure token is Uint8Array (not Buffer) for proper CBOR byte string encoding
-    // cbor2 encodes Buffer differently than Uint8Array
+  async present({ token, selectedDisclosures, holderPrivateKey, audience, nonce, algorithm = 'ES256' }) {
+    if (!audience) {
+      throw new Error('audience (aud) is REQUIRED in SD-KBT per spec Section 8.1');
+    }
+    if (!holderPrivateKey) {
+      throw new Error('holderPrivateKey is REQUIRED to sign the SD-KBT');
+    }
+
+    // Ensure token is Uint8Array
     const tokenBytes = Buffer.isBuffer(token) 
       ? new Uint8Array(token.buffer, token.byteOffset, token.length)
       : (token instanceof Uint8Array ? token : new Uint8Array(token));
     
-    // Also ensure disclosures are Uint8Arrays
+    // Ensure disclosures are Uint8Arrays
     const disclosureBytes = selectedDisclosures.map(d => 
       Buffer.isBuffer(d) 
         ? new Uint8Array(d.buffer, d.byteOffset, d.length)
         : (d instanceof Uint8Array ? d : new Uint8Array(d))
     );
-    
-    const presentation = [tokenBytes, disclosureBytes];
-    return Buffer.from(cbor.encode(presentation));
+
+    // Build the SD-CWT with disclosures in unprotected header
+    // We need to re-encode the SD-CWT with disclosures in the unprotected header
+    const sdCwtWithDisclosures = embedDisclosuresInToken(tokenBytes, disclosureBytes);
+
+    // Build SD-KBT payload per spec Section 8.1
+    // REQUIRED: aud (3), iat (6)
+    // OPTIONAL: cnonce (39), exp, nbf
+    const kbtPayload = new Map([
+      [sdCwt.ClaimKey.Aud, audience],
+      [sdCwt.ClaimKey.Iat, Math.floor(Date.now() / 1000)],
+    ]);
+
+    if (nonce) {
+      const nonceBytes = Buffer.isBuffer(nonce)
+        ? new Uint8Array(nonce.buffer, nonce.byteOffset, nonce.length)
+        : (nonce instanceof Uint8Array ? nonce : new Uint8Array(nonce));
+      kbtPayload.set(sdCwt.ClaimKey.Cnonce, nonceBytes);
+    }
+
+    // Build SD-KBT protected headers
+    // REQUIRED: typ, alg, kcwt (containing SD-CWT)
+    const kbtProtectedHeaders = new Map([
+      [sdCwt.HeaderParam.Typ, sdCwt.MediaType.KbCwt],
+      [sdCwt.HeaderParam.Kcwt, sdCwtWithDisclosures],
+    ]);
+
+    // Encode the payload
+    const payloadEncoded = cbor.encode(kbtPayload);
+
+    // Sign the SD-KBT with Holder's private key
+    const kbt = await coseSign1.sign(payloadEncoded, holderPrivateKey, {
+      algorithm,
+      customProtectedHeaders: kbtProtectedHeaders,
+    });
+
+    return kbt;
   },
 
   /**
@@ -201,6 +281,37 @@ export const Holder = {
     return validDisclosures;
   },
 };
+
+/**
+ * Embeds disclosures into the SD-CWT's unprotected header
+ * Per RFC 9528 Section 4.4.1: kcwt contains a CWT but without the CBOR tag.
+ * So we return the COSE_Sign1 array wrapped in Tag 18 (as raw bytes).
+ * 
+ * @param {Uint8Array} token - The original SD-CWT
+ * @param {Uint8Array[]} disclosures - The disclosures to embed
+ * @returns {Uint8Array} The SD-CWT with disclosures in unprotected header
+ */
+function embedDisclosuresInToken(token, disclosures) {
+  // Decode the COSE_Sign1 structure
+  const decoded = cbor.decode(token, sdCwt.cborDecodeOptions);
+  const coseArray = decoded.contents || decoded;
+  
+  // COSE_Sign1: [protected, unprotected, payload, signature]
+  const [protectedBytes, unprotectedMap, payload, signature] = coseArray;
+  
+  // Add disclosures to unprotected header
+  const newUnprotected = unprotectedMap instanceof Map ? new Map(unprotectedMap) : new Map();
+  newUnprotected.set(sdCwt.HeaderParam.SdClaims, disclosures);
+  
+  // Re-encode as COSE_Sign1 (tag 18) and return as Uint8Array
+  // The kcwt header expects raw CBOR bytes of the CWT
+  const newCoseArray = [protectedBytes, newUnprotected, payload, signature];
+  const encoded = cbor.encode(new cbor.Tag(18, newCoseArray));
+  // Ensure it's a Uint8Array (not Buffer) for proper handling
+  return Buffer.isBuffer(encoded) 
+    ? new Uint8Array(encoded.buffer, encoded.byteOffset, encoded.length)
+    : new Uint8Array(encoded);
+}
 
 /**
  * Recursively collects all redacted hashes from claims
@@ -241,68 +352,189 @@ function collectRedactedHashesFromArray(array, hashSet) {
 /**
  * SD-CWT Verifier API
  * 
- * Verifies SD-CWT presentations and reconstructs disclosed claims.
+ * Verifies SD-CWT presentations (SD-KBT) and reconstructs disclosed claims.
+ * Per spec Section 9: Verifier MUST validate both the SD-KBT and the embedded SD-CWT.
  */
 export const Verifier = {
   /**
-   * Verifies an SD-CWT presentation and returns the disclosed claims.
+   * Verifies an SD-KBT (Key Binding Token) presentation per spec Section 9.
    * 
    * This function:
-   * 1. Verifies the COSE signature
-   * 2. Validates disclosure hashes match redacted entries
-   * 3. Reconstructs claims from disclosures
-   * 4. Returns both the verified claims and metadata about redactions
+   * 1. Extracts the SD-CWT from the kcwt header in the SD-KBT
+   * 2. Verifies the SD-CWT signature using the Issuer's public key
+   * 3. Extracts the confirmation key (cnf) from the SD-CWT
+   * 4. Verifies the SD-KBT signature using the confirmation key
+   * 5. Validates audience matches the expected value
+   * 6. Validates nonce if provided
+   * 7. Reconstructs claims from disclosures
    * 
    * @param {Object} options - Verification options
-   * @param {Buffer|Uint8Array} options.presentation - The presentation (CBOR: [token, disclosures])
-   * @param {Object} options.publicKey - Issuer's public key {x, y}
+   * @param {Buffer|Uint8Array} options.presentation - The SD-KBT presentation
+   * @param {Object} options.issuerPublicKey - Issuer's public key {x, y}
+   * @param {string} options.expectedAudience - The expected audience value (REQUIRED per spec Section 9)
+   * @param {Uint8Array|Buffer} [options.expectedNonce] - Expected nonce if one was sent to Holder
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
    * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
    * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
-   * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
-   * @throws {Error} If signature verification fails or disclosures are invalid
+   * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], sdCwtClaims: Map, kbtPayload: Map, headers: Object}>} Verified result
+   * @throws {Error} If verification fails
    * 
    * @example
    * const result = await Verifier.verify({
-   *   presentation,
-   *   publicKey: issuerKey.publicKey,
+   *   presentation: kbt,
+   *   issuerPublicKey: issuerKey.publicKey,
+   *   expectedAudience: 'https://verifier.example/app',
    * });
-   * console.log(result.claims); // Reconstructed claims Map
    */
-  async verify({ presentation, publicKey, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
-    // Decode the presentation
-    const decoded = cbor.decode(presentation, sdCwt.cborDecodeOptions);
-    
-    if (!Array.isArray(decoded) || decoded.length !== 2) {
-      throw new Error('Invalid presentation format: expected [token, disclosures]');
+  async verify({ presentation, issuerPublicKey, expectedAudience, expectedNonce, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
+    if (!expectedAudience) {
+      throw new Error('expectedAudience is REQUIRED per spec Section 9 Step 6');
     }
 
-    const [tokenBytes, disclosures] = decoded;
+    // Step 1: Parse the SD-KBT and extract the SD-CWT from kcwt header
+    const kbtHeaders = coseSign1.getHeaders(presentation);
+    let sdCwtBytes = kbtHeaders.protectedHeaders.get(sdCwt.HeaderParam.Kcwt);
     
-    if (!Array.isArray(disclosures)) {
-      throw new Error('Invalid presentation format: disclosures must be an array');
+    if (!sdCwtBytes) {
+      throw new Error('Invalid SD-KBT: missing kcwt header parameter containing SD-CWT');
     }
 
-    // Ensure token is Uint8Array
-    const token = tokenBytes instanceof Uint8Array ? tokenBytes : new Uint8Array(tokenBytes);
+    // Handle case where kcwt was decoded as a CBOR Tag or Array instead of bytes
+    // The CBOR library may decode embedded CBOR structures
+    if (sdCwtBytes instanceof cbor.Tag) {
+      // It's a decoded CBOR Tag, re-encode to bytes
+      sdCwtBytes = cbor.encode(sdCwtBytes);
+    } else if (Array.isArray(sdCwtBytes) && sdCwtBytes.length === 4) {
+      // It's a decoded COSE_Sign1 array, wrap in Tag and encode
+      sdCwtBytes = cbor.encode(new cbor.Tag(18, sdCwtBytes));
+    }
 
-    // Verify the token and get the payload
-    return this.verifyToken({ token, disclosures, publicKey, hashAlgorithm, strict, requireClean });
+    // Ensure sdCwtBytes is Uint8Array
+    if (Buffer.isBuffer(sdCwtBytes)) {
+      sdCwtBytes = new Uint8Array(sdCwtBytes.buffer, sdCwtBytes.byteOffset, sdCwtBytes.length);
+    }
+
+    // Validate SD-KBT typ header
+    const kbtTyp = kbtHeaders.protectedHeaders.get(sdCwt.HeaderParam.Typ);
+    if (kbtTyp !== sdCwt.MediaType.KbCwt) {
+      throw new Error(`Invalid SD-KBT: typ must be "${sdCwt.MediaType.KbCwt}", got "${kbtTyp}"`);
+    }
+
+    // Step 2: Verify the SD-CWT signature using Issuer's public key
+    const sdCwtPayloadBytes = await coseSign1.verify(sdCwtBytes, issuerPublicKey);
+    const sdCwtClaims = cbor.decode(sdCwtPayloadBytes, sdCwt.cborDecodeOptions);
+
+    // Step 3: Extract the confirmation key from cnf claim
+    const cnfClaim = sdCwtClaims.get(sdCwt.ClaimKey.Cnf);
+    if (!cnfClaim) {
+      throw new Error('Invalid SD-CWT: missing cnf (8) claim with Holder confirmation key');
+    }
+
+    // Extract the public key from cnf claim
+    // cnf structure: { 1: { 1: kty, -1: crv, -2: x, -3: y } } (COSE_Key in map)
+    const holderPublicKey = extractPublicKeyFromCnf(cnfClaim);
+
+    // Step 4: Verify the SD-KBT signature using the confirmation key
+    const kbtPayloadBytes = await coseSign1.verify(presentation, holderPublicKey);
+    const kbtPayload = cbor.decode(kbtPayloadBytes, sdCwt.cborDecodeOptions);
+
+    // Step 5: Validate SD-KBT has required claims (aud, iat)
+    const kbtAud = kbtPayload.get(sdCwt.ClaimKey.Aud);
+    if (!kbtAud) {
+      throw new Error('Invalid SD-KBT: missing aud (3) claim');
+    }
+    const kbtIat = kbtPayload.get(sdCwt.ClaimKey.Iat);
+    if (kbtIat === undefined) {
+      throw new Error('Invalid SD-KBT: missing iat (6) claim');
+    }
+
+    // Step 6: Validate audience matches
+    if (kbtAud !== expectedAudience) {
+      throw new Error(`Audience mismatch: expected "${expectedAudience}", got "${kbtAud}"`);
+    }
+
+    // Validate SD-CWT audience if present
+    const sdCwtAud = sdCwtClaims.get(sdCwt.ClaimKey.Aud);
+    if (sdCwtAud && sdCwtAud !== expectedAudience) {
+      throw new Error(`SD-CWT audience mismatch: expected "${expectedAudience}", got "${sdCwtAud}"`);
+    }
+
+    // Validate nonce if expected
+    if (expectedNonce) {
+      const kbtNonce = kbtPayload.get(sdCwt.ClaimKey.Cnonce);
+      if (!kbtNonce) {
+        throw new Error('Expected nonce (cnonce) but none present in SD-KBT');
+      }
+      const expectedBytes = Buffer.isBuffer(expectedNonce) 
+        ? expectedNonce 
+        : Buffer.from(expectedNonce);
+      const actualBytes = Buffer.isBuffer(kbtNonce) 
+        ? kbtNonce 
+        : Buffer.from(kbtNonce);
+      if (!expectedBytes.equals(actualBytes)) {
+        throw new Error('Nonce mismatch');
+      }
+    }
+
+    // Step 7: Extract disclosures from SD-CWT unprotected header
+    const sdCwtHeaders = coseSign1.getHeaders(sdCwtBytes);
+    const disclosures = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdClaims) || [];
+
+    // Validate disclosures match redacted entries
+    const validatedDisclosures = validateDisclosures(sdCwtClaims, disclosures, hashAlgorithm);
+
+    // Reconstruct claims with the provided disclosures
+    const { claims, redactedKeys } = sdCwt.reconstructClaims(
+      sdCwtClaims, 
+      validatedDisclosures, 
+      { hashAlg: hashAlgorithm, strict }
+    );
+
+    // Optionally verify that claims are clean
+    if (requireClean) {
+      sdCwt.assertClaimsClean(claims, { strict });
+      if (redactedKeys.length > 0) {
+        throw new Error(`Claims contain SD-CWT artifacts:\n${redactedKeys.length} undisclosed redacted key(s) remain`);
+      }
+    }
+
+    return {
+      claims,
+      redactedKeys,
+      sdCwtClaims, // Original SD-CWT claims (for inspection)
+      kbtPayload,  // SD-KBT payload (aud, iat, cnonce)
+      headers: {
+        sdCwt: {
+          protected: sdCwtHeaders.protectedHeaders,
+          unprotected: sdCwtHeaders.unprotectedHeaders,
+        },
+        kbt: {
+          protected: kbtHeaders.protectedHeaders,
+          unprotected: kbtHeaders.unprotectedHeaders,
+        },
+      },
+    };
   },
 
   /**
-   * Verifies a raw SD-CWT token with separate disclosures.
+   * Verifies a raw SD-CWT token with separate disclosures (no key binding).
+   * 
+   * WARNING: This method does NOT verify key binding. Per spec, SD-CWT requires
+   * key binding (SD-KBT). Use verify() for spec-compliant verification.
+   * 
+   * This method is provided for testing and backwards compatibility only.
    * 
    * @param {Object} options - Verification options
    * @param {Buffer|Uint8Array} options.token - The SD-CWT token
    * @param {Uint8Array[]} options.disclosures - Disclosures to apply
    * @param {Object} options.publicKey - Issuer's public key {x, y}
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
-   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
+   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16
    * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
    * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
+   * @deprecated Use verify() with proper SD-KBT presentation for spec compliance
    */
-  async verifyToken({ token, disclosures, publicKey, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
+  async verifyWithoutKeyBinding({ token, disclosures, publicKey, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
     // Verify the COSE signature
     const payloadBytes = await coseSign1.verify(token, publicKey);
 
@@ -319,10 +551,9 @@ export const Verifier = {
       { hashAlg: hashAlgorithm, strict }
     );
 
-    // Optionally verify that claims are clean (no remaining SD-CWT artifacts)
+    // Optionally verify that claims are clean
     if (requireClean) {
       sdCwt.assertClaimsClean(claims, { strict });
-      // Also check that there are no remaining undisclosed claims
       if (redactedKeys.length > 0) {
         throw new Error(`Claims contain SD-CWT artifacts:\n${redactedKeys.length} undisclosed redacted key(s) remain`);
       }
@@ -340,21 +571,42 @@ export const Verifier = {
       },
     };
   },
-
-  /**
-   * Verifies a token without any disclosures (full redaction).
-   * Returns only the non-redacted claims.
-   * 
-   * @param {Object} options - Verification options
-   * @param {Buffer|Uint8Array} options.token - The SD-CWT token
-   * @param {Object} options.publicKey - Issuer's public key {x, y}
-   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16
-   * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
-   */
-  async verifyWithoutDisclosures({ token, publicKey, strict = false }) {
-    return this.verifyToken({ token, disclosures: [], publicKey, strict });
-  },
 };
+
+/**
+ * Extracts a public key from a cnf claim structure
+ * @param {Map|Object} cnfClaim - The cnf claim value
+ * @returns {Object} The public key {x, y}
+ */
+function extractPublicKeyFromCnf(cnfClaim) {
+  // cnf can be a Map or object with key 1 (COSE_Key)
+  let coseKey;
+  if (cnfClaim instanceof Map) {
+    coseKey = cnfClaim.get(1); // COSE_Key
+  } else if (typeof cnfClaim === 'object') {
+    coseKey = cnfClaim[1];
+  }
+
+  if (!coseKey) {
+    throw new Error('Invalid cnf claim: missing COSE_Key (key 1)');
+  }
+
+  // Extract x and y coordinates from COSE_Key
+  let x, y;
+  if (coseKey instanceof Map) {
+    x = coseKey.get(-2);
+    y = coseKey.get(-3);
+  } else if (typeof coseKey === 'object') {
+    x = coseKey[-2] || coseKey['-2'];
+    y = coseKey[-3] || coseKey['-3'];
+  }
+
+  if (!x || !y) {
+    throw new Error('Invalid COSE_Key in cnf: missing x (-2) or y (-3) coordinates');
+  }
+
+  return { x, y };
+}
 
 /**
  * Validates that disclosures match actual redacted entries in the claims.

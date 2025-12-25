@@ -16,7 +16,41 @@ import {
   MAX_DEPTH,
   validateClaimsClean,
   assertClaimsClean,
+  ClaimKey,
+  MediaType,
 } from '../src/api.js';
+
+import crypto from 'node:crypto';
+
+/**
+ * Helper to create a cnf claim with a holder's public key
+ * Converts Buffer to Uint8Array for proper CBOR encoding
+ */
+function createCnfClaim(holderPublicKey) {
+  // Convert Buffer to Uint8Array (Buffer doesn't CBOR-encode correctly)
+  const xBytes = Buffer.isBuffer(holderPublicKey.x)
+    ? new Uint8Array(holderPublicKey.x.buffer, holderPublicKey.x.byteOffset, holderPublicKey.x.length)
+    : holderPublicKey.x;
+  const yBytes = Buffer.isBuffer(holderPublicKey.y)
+    ? new Uint8Array(holderPublicKey.y.buffer, holderPublicKey.y.byteOffset, holderPublicKey.y.length)
+    : holderPublicKey.y;
+
+  return new Map([
+    [1, new Map([
+      [1, 2],  // kty: EC2
+      [-1, 1], // crv: P-256
+      [-2, xBytes],
+      [-3, yBytes],
+    ])],
+  ]);
+}
+
+/**
+ * Helper to generate a random nonce
+ */
+function generateNonce() {
+  return new Uint8Array(crypto.randomBytes(16));
+}
 
 describe('SD-CWT High-Level API', () => {
 
@@ -47,17 +81,51 @@ describe('SD-CWT High-Level API', () => {
   });
 
   describe('Issuer API', () => {
-    const keyPair = generateKeyPair();
+    const issuerKeyPair = generateKeyPair();
+    const holderKeyPair = generateKeyPair();
+
+    it('should require cnf claim per spec Section 7', async () => {
+      const claims = new Map([
+        [1, 'issuer.example'],
+        [2, 'subject-123'],
+        // Missing cnf claim
+      ]);
+
+      await assert.rejects(
+        Issuer.issue({
+          claims,
+          privateKey: issuerKeyPair.privateKey,
+        }),
+        /MUST include cnf/i
+      );
+    });
+
+    it('should reject redacted cnf claim per spec Section 7', async () => {
+      // cnf wrapped in toBeRedacted should be rejected
+      const claims = new Map([
+        [1, 'issuer.example'],
+        [toBeRedacted(ClaimKey.Cnf), createCnfClaim(holderKeyPair.publicKey)],
+      ]);
+
+      await assert.rejects(
+        Issuer.issue({
+          claims,
+          privateKey: issuerKeyPair.privateKey,
+        }),
+        /cnf.*MUST NOT be redacted/i
+      );
+    });
 
     it('should issue an SD-CWT with no redactable claims', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
         [2, 'subject-123'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       assert.ok(token.length > 0);
@@ -67,13 +135,14 @@ describe('SD-CWT High-Level API', () => {
     it('should issue an SD-CWT with redactable claims', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'sensitive-license-number'],
         [501, true],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       assert.ok(token.length > 0);
@@ -87,6 +156,7 @@ describe('SD-CWT High-Level API', () => {
 
     it('should issue an SD-CWT with multiple redactable claims', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'value1'],
         [toBeRedacted(501), 'value2'],
         [toBeRedacted(502), 'value3'],
@@ -95,7 +165,7 @@ describe('SD-CWT High-Level API', () => {
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       assert.ok(token.length > 0);
@@ -104,6 +174,7 @@ describe('SD-CWT High-Level API', () => {
 
     it('should issue an SD-CWT with decoys', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [toBeDecoy(3), null],
         [501, 'public'],
@@ -111,7 +182,7 @@ describe('SD-CWT High-Level API', () => {
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // Only 1 real disclosure (decoys don't create disclosures)
@@ -131,12 +202,13 @@ describe('SD-CWT High-Level API', () => {
 
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [503, innerMap],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       assert.strictEqual(disclosures.length, 1);
@@ -154,23 +226,27 @@ describe('SD-CWT High-Level API', () => {
       ];
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [502, dates],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       assert.strictEqual(disclosures.length, 2);
     });
 
     it('should include kid in the token when provided', async () => {
-      const claims = new Map([[1, 'issuer.example']]);
+      const claims = new Map([
+        [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+      ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
         kid: 'issuer-key-1',
       });
 
@@ -183,7 +259,7 @@ describe('SD-CWT High-Level API', () => {
       await assert.rejects(
         () => Issuer.issue({
           claims: { not: 'a-map' },
-          privateKey: keyPair.privateKey,
+          privateKey: issuerKeyPair.privateKey,
         }),
         /Claims must be a Map/
       );
@@ -191,17 +267,19 @@ describe('SD-CWT High-Level API', () => {
   });
 
   describe('Holder API', () => {
-    const keyPair = generateKeyPair();
+    const issuerKeyPair = generateKeyPair();
+    const holderKeyPair = generateKeyPair();
 
     it('should parse an SD-CWT token', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const parsed = Holder.parse(token);
@@ -213,6 +291,7 @@ describe('SD-CWT High-Level API', () => {
 
     it('should select disclosures by claim name', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'value500'],
         [toBeRedacted(501), 'value501'],
         [toBeRedacted(502), 'value502'],
@@ -220,7 +299,7 @@ describe('SD-CWT High-Level API', () => {
 
       const { disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // Select only claim 500 and 502
@@ -235,48 +314,131 @@ describe('SD-CWT High-Level API', () => {
       assert.ok(!selectedNames.includes(501));
     });
 
-    it('should create a presentation with selected disclosures', async () => {
+    it('should require audience for presentation per spec Section 8.1', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      // Missing audience should throw
+      await assert.rejects(
+        Holder.present({
+          token,
+          selectedDisclosures: disclosures,
+          holderPrivateKey: holderKeyPair.privateKey,
+          // audience: missing
+        }),
+        /audience.*REQUIRED/i
+      );
+    });
+
+    it('should require holder private key for presentation', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [toBeRedacted(500), 'secret'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      // Missing holderPrivateKey should throw
+      await assert.rejects(
+        Holder.present({
+          token,
+          selectedDisclosures: disclosures,
+          audience: 'https://verifier.example/app',
+          // holderPrivateKey: missing
+        }),
+        /holderPrivateKey.*REQUIRED/i
+      );
+    });
+
+    it('should create an SD-KBT presentation with audience', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [toBeRedacted(500), 'secret'],
+        [501, 'public'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: 'https://verifier.example/app',
+      });
       
-      assert.ok(presentation.length > token.length);
+      assert.ok(kbt.length > token.length);
+    });
+
+    it('should create an SD-KBT with nonce', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'public'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const nonce = generateNonce();
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: 'https://verifier.example/app',
+        nonce,
+      });
+      
+      assert.ok(kbt.length > 0);
     });
 
     it('should create a presentation with no disclosures (full redaction)', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // Present with no disclosures
-      const presentation = Holder.present(token, []);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: 'https://verifier.example/app',
+      });
       
-      assert.ok(presentation.length > 0);
+      assert.ok(kbt.length > 0);
     });
 
     it('should filter valid disclosures', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const parsed = Holder.parse(token);
@@ -287,25 +449,62 @@ describe('SD-CWT High-Level API', () => {
   });
 
   describe('Verifier API', () => {
-    const keyPair = generateKeyPair();
+    const issuerKeyPair = generateKeyPair();
+    const holderKeyPair = generateKeyPair();
+    const expectedAudience = 'https://verifier.example/app';
+
+    it('should require expectedAudience per spec Section 9', async () => {
+      const claims = new Map([
+        [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          // expectedAudience: missing
+        }),
+        /expectedAudience.*REQUIRED/i
+      );
+    });
 
     it('should verify a presentation with full disclosure', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'sensitive-value'],
         [501, 'public-value'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       assert.ok(result.claims instanceof Map);
@@ -318,22 +517,29 @@ describe('SD-CWT High-Level API', () => {
     it('should verify a presentation with partial disclosure', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'disclosed'],
         [toBeRedacted(501), 'redacted'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // Only disclose claim 500
       const selectedDisclosures = Holder.selectDisclosures(disclosures, [500]);
-      const presentation = Holder.present(token, selectedDisclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       assert.strictEqual(result.claims.get(500), 'disclosed');
@@ -344,19 +550,26 @@ describe('SD-CWT High-Level API', () => {
     it('should verify a presentation with no disclosures', async () => {
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, []);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       assert.strictEqual(result.claims.get(1), 'issuer.example');
@@ -364,84 +577,257 @@ describe('SD-CWT High-Level API', () => {
       assert.strictEqual(result.redactedKeys.length, 1);
     });
 
-    it('should verify a token directly without presentation wrapper', async () => {
+    it('should reject presentation with wrong audience', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: 'https://attacker.example/app',
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience: 'https://verifier.example/app',
+        }),
+        /Audience mismatch/i
+      );
+    });
+
+    it('should validate nonce when provided', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const nonce = generateNonce();
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+        nonce,
+      });
+
+      // Should succeed with correct nonce
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
+        expectedNonce: nonce,
+      });
+
+      assert.ok(result.claims);
+    });
+
+    it('should reject presentation with wrong nonce', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+        nonce: generateNonce(),
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience,
+          expectedNonce: generateNonce(), // Different nonce
+        }),
+        /Nonce mismatch/i
+      );
+    });
+
+    it('should reject presentation when nonce expected but not provided', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      // Create presentation without nonce
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+        // no nonce
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience,
+          expectedNonce: generateNonce(), // Verifier expects a nonce
+        }),
+        /nonce.*none present/i
+      );
+    });
+
+    it('should fail verification with wrong issuer key', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
+
+      const wrongIssuerKey = generateKeyPair();
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: wrongIssuerKey.publicKey,
+          expectedAudience,
+        }),
+        /Signature verification failed/i
+      );
+    });
+
+    it('should fail verification when holder uses wrong key', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      // Attacker tries to present with their own key
+      const attackerKeyPair = generateKeyPair();
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: attackerKeyPair.privateKey, // Wrong key!
+        audience: expectedAudience,
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience,
+        }),
+        /Signature verification failed/i
+      );
+    });
+
+    it('should reject presentation without SD-KBT structure', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      // Try to use raw token instead of SD-KBT
+      await assert.rejects(
+        Verifier.verify({
+          presentation: token, // Raw token, not SD-KBT
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience,
+        }),
+        /Invalid SD-KBT|missing kcwt/i
+      );
+    });
+
+    it('should return KBT payload with aud and iat', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
+        [500, 'value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: issuerKeyPair.privateKey,
+      });
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
+      });
+
+      // Should have KBT payload with aud and iat
+      assert.ok(result.kbtPayload instanceof Map);
+      assert.strictEqual(result.kbtPayload.get(ClaimKey.Aud), expectedAudience);
+      assert.ok(typeof result.kbtPayload.get(ClaimKey.Iat) === 'number');
+    });
+
+    it('should verify token without key binding (deprecated method)', async () => {
+      // This tests the backwards-compatible method for testing purposes
       const claims = new Map([
         [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const result = await Verifier.verifyToken({
+      const result = await Verifier.verifyWithoutKeyBinding({
         token,
         disclosures,
-        publicKey: keyPair.publicKey,
+        publicKey: issuerKeyPair.publicKey,
       });
 
       assert.strictEqual(result.claims.get(500), 'secret');
-    });
-
-    it('should verify a token without disclosures', async () => {
-      const claims = new Map([
-        [1, 'issuer.example'],
-        [toBeRedacted(500), 'secret'],
-      ]);
-
-      const { token } = await Issuer.issue({
-        claims,
-        privateKey: keyPair.privateKey,
-      });
-
-      const result = await Verifier.verifyWithoutDisclosures({
-        token,
-        publicKey: keyPair.publicKey,
-      });
-
-      assert.strictEqual(result.claims.get(1), 'issuer.example');
-      assert.strictEqual(result.claims.has(500), false);
-    });
-
-    it('should fail verification with wrong key', async () => {
-      const claims = new Map([[1, 'issuer.example']]);
-
-      const { token } = await Issuer.issue({
-        claims,
-        privateKey: keyPair.privateKey,
-      });
-
-      const wrongKey = generateKeyPair();
-      const presentation = Holder.present(token, []);
-
-      await assert.rejects(
-        () => Verifier.verify({
-          presentation,
-          publicKey: wrongKey.publicKey,
-        }),
-        /Signature verification failed/
-      );
-    });
-
-    it('should return header information', async () => {
-      const claims = new Map([[1, 'issuer.example']]);
-
-      const { token } = await Issuer.issue({
-        claims,
-        privateKey: keyPair.privateKey,
-        kid: 'test-key',
-      });
-
-      const presentation = Holder.present(token, []);
-
-      const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
-      });
-
-      assert.ok(result.headers.protected instanceof Map);
-      assert.ok(result.headers.unprotected instanceof Map);
     });
 
     it('should handle nested map reconstructions', async () => {
@@ -451,19 +837,26 @@ describe('SD-CWT High-Level API', () => {
       ]);
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [503, innerMap],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       const location = result.claims.get(503);
@@ -479,19 +872,26 @@ describe('SD-CWT High-Level API', () => {
       ];
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [502, dates],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       const reconstructedDates = result.claims.get(502);
@@ -501,17 +901,19 @@ describe('SD-CWT High-Level API', () => {
   });
 
   describe('Utils', () => {
-    const keyPair = generateKeyPair();
+    const issuerKeyPair = generateKeyPair();
+    const holderKeyPair = generateKeyPair();
 
     it('should check if claims have redactions', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const parsed = Holder.parse(token);
@@ -520,13 +922,14 @@ describe('SD-CWT High-Level API', () => {
 
     it('should return false if no redactions', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [500, 'public1'],
         [501, 'public2'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const parsed = Holder.parse(token);
@@ -541,6 +944,7 @@ describe('SD-CWT High-Level API', () => {
       ];
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret1'],
         [toBeRedacted(501), 'secret2'],
         [502, dates],
@@ -549,7 +953,7 @@ describe('SD-CWT High-Level API', () => {
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const parsed = Holder.parse(token);
@@ -562,6 +966,7 @@ describe('SD-CWT High-Level API', () => {
 
     it('should get disclosable claim names', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'val1'],
         [toBeRedacted('myString'), 'val2'],
         [toBeRedacted(-7), 'val3'],
@@ -570,7 +975,7 @@ describe('SD-CWT High-Level API', () => {
 
       const { disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       const names = Utils.getDisclosableClaimNames(disclosures);
@@ -583,15 +988,18 @@ describe('SD-CWT High-Level API', () => {
   });
 
   describe('End-to-End Scenarios', () => {
-    it('should complete full SD-CWT workflow', async () => {
-      // 1. Issuer generates keys
+    it('should complete full SD-CWT workflow with key binding', async () => {
+      // 1. Generate keys
       const issuerKey = generateKeyPair();
+      const holderKey = generateKeyPair();
+      const expectedAudience = 'https://dmv.example.gov/verify';
 
-      // 2. Issuer creates SD-CWT with redactable claims
+      // 2. Issuer creates SD-CWT with redactable claims and holder's cnf
       const claims = new Map([
         [1, 'issuer.example'],           // iss
         [2, 'user-12345'],               // sub
         [6, Math.floor(Date.now() / 1000)], // iat
+        [ClaimKey.Cnf, createCnfClaim(holderKey.publicKey)], // REQUIRED cnf
         [toBeRedacted(500), 'DL-123456'], // license number - redactable
         [toBeRedacted(501), '1990-01-15'], // birthdate - redactable
         [502, true],                      // over_21 - public
@@ -610,14 +1018,20 @@ describe('SD-CWT High-Level API', () => {
       assert.ok(availableClaims.includes(500));
       assert.ok(availableClaims.includes(501));
 
-      // 4. Holder creates presentation, disclosing only birthdate
+      // 4. Holder creates SD-KBT presentation, disclosing only birthdate
       const selectedDisclosures = Holder.selectDisclosures(disclosures, [501]);
-      const presentation = Holder.present(token, selectedDisclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures,
+        holderPrivateKey: holderKey.privateKey,
+        audience: expectedAudience,
+      });
 
-      // 5. Verifier verifies the presentation
+      // 5. Verifier verifies the SD-KBT
       const result = await Verifier.verify({
-        presentation,
-        publicKey: issuerKey.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKey.publicKey,
+        expectedAudience,
       });
 
       // 6. Verify results
@@ -629,10 +1043,56 @@ describe('SD-CWT High-Level API', () => {
       
       // Should have 1 remaining redacted key (claim 500) + 2 decoys = 3
       assert.strictEqual(result.redactedKeys.length, 3);
+
+      // Verify KBT payload
+      assert.strictEqual(result.kbtPayload.get(ClaimKey.Aud), expectedAudience);
+      assert.ok(result.kbtPayload.has(ClaimKey.Iat));
+    });
+
+    it('should complete workflow with nonce for replay protection', async () => {
+      const issuerKey = generateKeyPair();
+      const holderKey = generateKeyPair();
+      const expectedAudience = 'https://bank.example/verify';
+
+      // Verifier provides a nonce to the holder
+      const verifierNonce = generateNonce();
+
+      const claims = new Map([
+        [1, 'issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(holderKey.publicKey)],
+        [toBeRedacted(500), 'account-12345'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: issuerKey.privateKey,
+      });
+
+      // Holder includes the nonce in the presentation
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKey.privateKey,
+        audience: expectedAudience,
+        nonce: verifierNonce,
+      });
+
+      // Verifier validates the nonce
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: issuerKey.publicKey,
+        expectedAudience,
+        expectedNonce: verifierNonce,
+      });
+
+      assert.strictEqual(result.claims.get(500), 'account-12345');
+      assert.ok(result.kbtPayload.get(ClaimKey.Cnonce));
     });
 
     it('should handle complex nested structures', async () => {
       const issuerKey = generateKeyPair();
+      const holderKey = generateKeyPair();
+      const expectedAudience = 'https://verifier.example';
 
       const inspectionDates = [
         toBeRedacted(1549560720),
@@ -647,6 +1107,7 @@ describe('SD-CWT High-Level API', () => {
       ]);
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKey.publicKey)],
         [500, true],
         [502, inspectionDates],
         [503, inspectionLocation],
@@ -659,11 +1120,17 @@ describe('SD-CWT High-Level API', () => {
       });
 
       // Full disclosure
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKey.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: issuerKey.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKey.publicKey,
+        expectedAudience,
       });
 
       assert.strictEqual(result.claims.get(500), true);
@@ -682,24 +1149,34 @@ describe('SD-CWT High-Level API', () => {
 
     it('should work with different algorithms', async () => {
       for (const algorithm of [Algorithm.ES256, Algorithm.ES384, Algorithm.ES512]) {
-        const keyPair = generateKeyPair(algorithm);
+        const issuerKey = generateKeyPair(algorithm);
+        const holderKey = generateKeyPair(algorithm);
+        const expectedAudience = 'https://verifier.example';
 
         const claims = new Map([
+          [ClaimKey.Cnf, createCnfClaim(holderKey.publicKey)],
           [toBeRedacted(500), 'secret'],
           [501, 'public'],
         ]);
 
         const { token, disclosures } = await Issuer.issue({
           claims,
-          privateKey: keyPair.privateKey,
+          privateKey: issuerKey.privateKey,
           algorithm,
         });
 
-        const presentation = Holder.present(token, disclosures);
+        const kbt = await Holder.present({
+          token,
+          selectedDisclosures: disclosures,
+          holderPrivateKey: holderKey.privateKey,
+          audience: expectedAudience,
+          algorithm,
+        });
 
         const result = await Verifier.verify({
-          presentation,
-          publicKey: keyPair.publicKey,
+          presentation: kbt,
+          issuerPublicKey: issuerKey.publicKey,
+          expectedAudience,
         });
 
         assert.strictEqual(result.claims.get(500), 'secret');
@@ -723,7 +1200,9 @@ describe('API: Strict Depth and Validation', () => {
   // The `requireClean` option is an extension for use cases that need
   // all claims disclosed (no redacted elements remaining).
 
-  const keyPair = generateKeyPair();
+  const issuerKeyPair = generateKeyPair();
+  const holderKeyPair = generateKeyPair();
+  const expectedAudience = 'https://verifier.example';
 
   describe('MAX_DEPTH constant export', () => {
     it('should export MAX_DEPTH as 16 per spec Section 6.5', () => {
@@ -734,13 +1213,14 @@ describe('API: Strict Depth and Validation', () => {
   describe('Issuer with strict mode', () => {
     it('should issue with strict mode enabled', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
         strict: true,
       });
 
@@ -754,11 +1234,13 @@ describe('API: Strict Depth and Validation', () => {
       for (let i = 0; i < 17; i++) {
         current = new Map([['nested', current]]);
       }
+      // Add required cnf at top level
+      current.set(ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey));
 
       await assert.rejects(
         Issuer.issue({
           claims: current,
-          privateKey: keyPair.privateKey,
+          privateKey: issuerKeyPair.privateKey,
           strict: true,
         }),
         /exceeds maximum/
@@ -769,20 +1251,27 @@ describe('API: Strict Depth and Validation', () => {
   describe('Verifier with strict mode', () => {
     it('should verify with strict mode enabled', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
         strict: true,
       });
 
@@ -793,21 +1282,28 @@ describe('API: Strict Depth and Validation', () => {
   describe('Verifier with requireClean option', () => {
     it('should pass requireClean when all disclosures provided', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       // Should not throw with requireClean when fully disclosed
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
         requireClean: true,
       });
 
@@ -816,23 +1312,30 @@ describe('API: Strict Depth and Validation', () => {
 
     it('should fail requireClean when disclosures are missing', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
       ]);
 
       const { token } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // Present with no disclosures
-      const presentation = Holder.present(token, []);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       // Should throw because claims still have redacted entries
       await assert.rejects(
         Verifier.verify({
-          presentation,
-          publicKey: keyPair.publicKey,
+          presentation: kbt,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience,
           requireClean: true,
         }),
         /SD-CWT artifacts/
@@ -871,6 +1374,7 @@ describe('API: Strict Depth and Validation', () => {
       ]);
 
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         ['nested', nested],
         [toBeRedacted('outer'), 'outer-secret'],
         [toBeDecoy(2), null],
@@ -878,17 +1382,23 @@ describe('API: Strict Depth and Validation', () => {
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // 2 real disclosures (inner + outer)
       assert.strictEqual(disclosures.length, 2);
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       // Verify reconstructed values
@@ -905,6 +1415,7 @@ describe('API: Strict Depth and Validation', () => {
 
     it('should handle arrays with redactable elements and decoys', async () => {
       const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(holderKeyPair.publicKey)],
         ['items', [
           toBeRedacted('secret-item'),
           'public-item',
@@ -914,17 +1425,23 @@ describe('API: Strict Depth and Validation', () => {
 
       const { token, disclosures } = await Issuer.issue({
         claims,
-        privateKey: keyPair.privateKey,
+        privateKey: issuerKeyPair.privateKey,
       });
 
       // 1 real disclosure for array element
       assert.strictEqual(disclosures.length, 1);
 
-      const presentation = Holder.present(token, disclosures);
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: holderKeyPair.privateKey,
+        audience: expectedAudience,
+      });
 
       const result = await Verifier.verify({
-        presentation,
-        publicKey: keyPair.publicKey,
+        presentation: kbt,
+        issuerPublicKey: issuerKeyPair.publicKey,
+        expectedAudience,
       });
 
       const items = result.claims.get('items');
