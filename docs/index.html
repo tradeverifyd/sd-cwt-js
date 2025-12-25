@@ -504,7 +504,7 @@
 <body>
   <header>
     <h1>SD-CWT Playground</h1>
-    <p>Interactive testing for Selective Disclosure CBOR Web Tokens</p>
+    <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank" style="color: var(--accent-cyan);">spec test vectors</a></p>
   </header>
 
   <main>
@@ -517,12 +517,13 @@
         </div>
         <div class="card-body">
           <div class="key-section">
-            <h3>Issuer Key Pair</h3>
+            <h3>Issuer Key Pair (ES384 for spec, ES256 for new)</h3>
             <div class="btn-row">
-              <button class="small-btn primary" onclick="generateIssuerKey()">Generate New Key</button>
+              <button class="small-btn primary" onclick="loadSpecIssuerKey()">Load Spec Key</button>
+              <button class="small-btn primary" onclick="generateIssuerKey()">Generate New</button>
             </div>
             <div class="form-group" style="margin-top: 0.75rem;">
-              <input type="text" id="issuerKeyDisplay" readonly placeholder="No key generated" style="font-size: 0.75rem;">
+              <input type="text" id="issuerKeyDisplay" readonly placeholder="No key loaded" style="font-size: 0.75rem;">
             </div>
           </div>
 
@@ -557,12 +558,13 @@
         </div>
         <div class="card-body">
           <div class="key-section">
-            <h3>Holder Key Pair</h3>
+            <h3>Holder Key Pair (ES256)</h3>
             <div class="btn-row">
-              <button class="small-btn primary" onclick="generateHolderKey()">Generate New Key</button>
+              <button class="small-btn primary" onclick="loadSpecHolderKey()">Load Spec Key</button>
+              <button class="small-btn primary" onclick="generateHolderKey()">Generate New</button>
             </div>
             <div class="form-group" style="margin-top: 0.75rem;">
-              <input type="text" id="holderKeyDisplay" readonly placeholder="No key generated" style="font-size: 0.75rem;">
+              <input type="text" id="holderKeyDisplay" readonly placeholder="No key loaded" style="font-size: 0.75rem;">
             </div>
           </div>
 
@@ -653,35 +655,146 @@
 
   <script src="js/sd-cwt.js"></script>
   <script>
+    // ==========================================================================
+    // Spec Test Keys from Appendix C of draft-ietf-spice-sd-cwt
+    // ==========================================================================
+    
+    // C.1. Subject / Holder key (P-256 / ES256)
+    const SPEC_HOLDER_KEY = {
+      privateKey: {
+        // /d/ -4 : h'5759a86e59bb3b002dde467da4b52f3d06e6c2cd439456cf0485b9b864294ce5'
+        d: hexToBytes('5759a86e59bb3b002dde467da4b52f3d06e6c2cd439456cf0485b9b864294ce5'),
+        // /x/ -2 : h'8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d'
+        x: hexToBytes('8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d'),
+        // /y/ -3 : h'4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'
+        y: hexToBytes('4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'),
+      },
+      publicKey: {
+        x: hexToBytes('8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d'),
+        y: hexToBytes('4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'),
+      },
+      algorithm: 'ES256',
+      curve: 'P-256',
+    };
+
+    // C.2. Issuer key (P-384 / ES384)
+    const SPEC_ISSUER_KEY = {
+      privateKey: {
+        // /d/ -4 : h'71c54d2221937ea612db1221f0d3ddf771c9381c4e3be41d5aa0a89d685f09cfef74c4bbf104783fd57e87ab227d074c'
+        d: hexToBytes('71c54d2221937ea612db1221f0d3ddf771c9381c4e3be41d5aa0a89d685f09cfef74c4bbf104783fd57e87ab227d074c'),
+        // /x/ -2 : h'c31798b0c7885fa3528fbf877e5b4c3a6dc67a5a5dc6b307b728c3725926f2abe5fb4964cd91e3948a5493f6ebb6cbbf'
+        x: hexToBytes('c31798b0c7885fa3528fbf877e5b4c3a6dc67a5a5dc6b307b728c3725926f2abe5fb4964cd91e3948a5493f6ebb6cbbf'),
+        // /y/ -3 : h'8f6c7ec761691cad374c4daa9387453f18058ece58eb0a8e84a055a31fb7f9214b27509522c159e764f8711e11609554'
+        y: hexToBytes('8f6c7ec761691cad374c4daa9387453f18058ece58eb0a8e84a055a31fb7f9214b27509522c159e764f8711e11609554'),
+      },
+      publicKey: {
+        x: hexToBytes('c31798b0c7885fa3528fbf877e5b4c3a6dc67a5a5dc6b307b728c3725926f2abe5fb4964cd91e3948a5493f6ebb6cbbf'),
+        y: hexToBytes('8f6c7ec761691cad374c4daa9387453f18058ece58eb0a8e84a055a31fb7f9214b27509522c159e764f8711e11609554'),
+      },
+      algorithm: 'ES384',
+      curve: 'P-384',
+    };
+
+    function hexToBytes(hex) {
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      }
+      return bytes;
+    }
+
+    // ==========================================================================
     // State
+    // ==========================================================================
     let issuerKeyPair = null;
     let holderKeyPair = null;
+    let issuerAlgorithm = 'ES384';  // Spec uses ES384 for issuer
+    let holderAlgorithm = 'ES256';  // Spec uses ES256 for holder
     let issuedToken = null;
     let disclosures = [];
     let currentTabView = 'claims';
 
-    // Initialize with sample data
-    document.getElementById('issuerClaims').value = JSON.stringify({
-      "sub": "user_123",
-      "name": { "toBeRedacted": true, "value": "Alice Smith" },
-      "email": { "toBeRedacted": true, "value": "alice@example.com" },
-      "birthdate": { "toBeRedacted": true, "value": "1990-01-15" },
-      "verified": true,
-      "roles": ["user", { "toBeRedacted": true, "value": "admin" }]
-    }, null, 2);
+    // ==========================================================================
+    // Initialize with Spec Example Data (Section 13.1)
+    // ==========================================================================
+    
+    // Claims from Section 13.1 example (converted to JSON format)
+    const SPEC_CLAIMS = {
+      "/ iss / 1": "https://issuer.example",
+      "/ sub / 2": "https://device.example",
+      "/ exp / 4": 1725330600,
+      "/ nbf / 5": 1725243900,
+      "/ iat / 6": 1725244200,
+      "/ most_recent_inspection_passed / 500": true,
+      "/ inspector_license_number / 501": { "toBeRedacted": true, "value": "ABCD-123456" },
+      "/ inspection_location / 503": {
+        "country": "us",
+        "region": { "toBeRedacted": true, "value": "ca" },
+        "postal_code": { "toBeRedacted": true, "value": "94188" }
+      }
+    };
 
-    document.getElementById('holderAudience').value = 'https://verifier.example.com';
-    document.getElementById('verifierAudience').value = 'https://verifier.example.com';
+    document.getElementById('issuerClaims').value = JSON.stringify(SPEC_CLAIMS, null, 2);
+    document.getElementById('holderAudience').value = 'https://verifier.example';
+    document.getElementById('verifierAudience').value = 'https://verifier.example';
 
-    // Key generation
+    // ==========================================================================
+    // Key Management - Using COSE Key format (serialized as hex)
+    // ==========================================================================
+    
+    function loadSpecIssuerKey() {
+      try {
+        // Convert spec key to COSE Key Map format
+        issuerKeyPair = {
+          privateKey: createCoseKeyMap(SPEC_ISSUER_KEY.privateKey, 'ES384', true),
+          publicKey: createCoseKeyMap(SPEC_ISSUER_KEY.publicKey, 'ES384', false),
+        };
+        issuerAlgorithm = 'ES384';
+        
+        const publicKeyHex = SDCWT.coseKeyToHex(issuerKeyPair.publicKey);
+        document.getElementById('issuerKeyDisplay').value = 
+          `Spec ES384: ${publicKeyHex.slice(0, 24)}...`;
+        document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+        showStatus('issuerStatus', 'Loaded Spec Issuer Key (ES384/P-384)', 'success');
+      } catch (error) {
+        showStatus('issuerStatus', 'Failed to load spec key: ' + error.message, 'error');
+      }
+    }
+
+    function loadSpecHolderKey() {
+      try {
+        // Convert spec key to COSE Key Map format
+        holderKeyPair = {
+          privateKey: createCoseKeyMap(SPEC_HOLDER_KEY.privateKey, 'ES256', true),
+          publicKey: createCoseKeyMap(SPEC_HOLDER_KEY.publicKey, 'ES256', false),
+        };
+        holderAlgorithm = 'ES256';
+        
+        const publicKeyHex = SDCWT.coseKeyToHex(holderKeyPair.publicKey);
+        document.getElementById('holderKeyDisplay').value = 
+          `Spec ES256: ${publicKeyHex.slice(0, 24)}...`;
+        document.getElementById('holderPublicKeyForIssuer').value = publicKeyHex;
+        showStatus('holderStatus', 'Loaded Spec Holder Key (ES256/P-256)', 'success');
+      } catch (error) {
+        showStatus('holderStatus', 'Failed to load spec key: ' + error.message, 'error');
+      }
+    }
+
     async function generateIssuerKey() {
       try {
-        issuerKeyPair = await generateKeyPair();
+        // Generate new ES256 key pair (P-256)
+        const keyPair = await generateWebCryptoKeyPair('P-256');
+        issuerKeyPair = {
+          privateKey: createCoseKeyMap(keyPair.privateKey, 'ES256', true),
+          publicKey: createCoseKeyMap(keyPair.publicKey, 'ES256', false),
+        };
+        issuerAlgorithm = 'ES256';
+        
+        const publicKeyHex = SDCWT.coseKeyToHex(issuerKeyPair.publicKey);
         document.getElementById('issuerKeyDisplay').value = 
-          `Public: ${SDCWT.Hex.encode(issuerKeyPair.publicKey.x).slice(0, 16)}...`;
-        document.getElementById('issuerPublicKeyForVerifier').value = 
-          serializePublicKey(issuerKeyPair.publicKey);
-        showStatus('issuerStatus', 'Issuer key pair generated', 'success');
+          `New ES256: ${publicKeyHex.slice(0, 24)}...`;
+        document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+        showStatus('issuerStatus', 'New Issuer Key generated (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('issuerStatus', 'Key generation failed: ' + error.message, 'error');
       }
@@ -689,20 +802,27 @@
 
     async function generateHolderKey() {
       try {
-        holderKeyPair = await generateKeyPair();
+        // Generate new ES256 key pair (P-256)
+        const keyPair = await generateWebCryptoKeyPair('P-256');
+        holderKeyPair = {
+          privateKey: createCoseKeyMap(keyPair.privateKey, 'ES256', true),
+          publicKey: createCoseKeyMap(keyPair.publicKey, 'ES256', false),
+        };
+        holderAlgorithm = 'ES256';
+        
+        const publicKeyHex = SDCWT.coseKeyToHex(holderKeyPair.publicKey);
         document.getElementById('holderKeyDisplay').value = 
-          `Public: ${SDCWT.Hex.encode(holderKeyPair.publicKey.x).slice(0, 16)}...`;
-        document.getElementById('holderPublicKeyForIssuer').value = 
-          serializePublicKey(holderKeyPair.publicKey);
-        showStatus('holderStatus', 'Holder key pair generated', 'success');
+          `New ES256: ${publicKeyHex.slice(0, 24)}...`;
+        document.getElementById('holderPublicKeyForIssuer').value = publicKeyHex;
+        showStatus('holderStatus', 'New Holder Key generated (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('holderStatus', 'Key generation failed: ' + error.message, 'error');
       }
     }
 
-    async function generateKeyPair() {
+    async function generateWebCryptoKeyPair(namedCurve) {
       const keyPair = await crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'P-256' },
+        { name: 'ECDSA', namedCurve },
         true,
         ['sign', 'verify']
       );
@@ -723,6 +843,22 @@
       };
     }
 
+    function createCoseKeyMap(key, algorithm, includePrivate) {
+      // COSE Key parameters
+      const kty = 2;  // EC2
+      const crv = algorithm === 'ES384' ? 2 : 1;  // P-384 = 2, P-256 = 1
+      
+      const coseKey = new Map();
+      coseKey.set(1, kty);   // kty
+      coseKey.set(-1, crv);  // crv
+      coseKey.set(-2, key.x); // x
+      coseKey.set(-3, key.y); // y
+      if (includePrivate && key.d) {
+        coseKey.set(-4, key.d); // d
+      }
+      return coseKey;
+    }
+
     function base64urlDecode(str) {
       const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
       const pad = base64.length % 4;
@@ -735,46 +871,46 @@
       return bytes;
     }
 
-    function serializePublicKey(publicKey) {
-      const x = SDCWT.Hex.encode(publicKey.x);
-      const y = SDCWT.Hex.encode(publicKey.y);
-      return x + y;
-    }
-
-    function deserializePublicKey(hex) {
-      const bytes = SDCWT.Hex.decode(hex);
-      const keySize = bytes.length / 2;
-      return {
-        x: bytes.slice(0, keySize),
-        y: bytes.slice(keySize),
-      };
-    }
-
-    // Claims transformation
-    function transformClaimsForIssue(claims, holderPublicKey) {
+    // ==========================================================================
+    // Claims Transformation
+    // ==========================================================================
+    
+    function transformClaimsForIssue(claims, holderPublicKeyCoseMap) {
       const result = new Map();
       
-      // Add standard claims
-      result.set(6, Math.floor(Date.now() / 1000)); // iat
-      result.set(4, Math.floor(Date.now() / 1000) + 3600); // exp (1 hour)
+      // Add confirmation claim with holder's public key (COSE Key Map)
+      // Create a public-key-only version (no private key)
+      const publicOnlyCoseKey = new Map();
+      publicOnlyCoseKey.set(1, holderPublicKeyCoseMap.get(1));   // kty
+      publicOnlyCoseKey.set(-1, holderPublicKeyCoseMap.get(-1)); // crv
+      publicOnlyCoseKey.set(-2, holderPublicKeyCoseMap.get(-2)); // x
+      publicOnlyCoseKey.set(-3, holderPublicKeyCoseMap.get(-3)); // y
       
-      // Add confirmation claim with holder's public key
       const cnf = new Map();
-      const coseKey = new Map();
-      coseKey.set(1, 2);  // kty: EC2
-      coseKey.set(-1, 1); // crv: P-256
-      coseKey.set(-2, holderPublicKey.x); // x
-      coseKey.set(-3, holderPublicKey.y); // y
-      cnf.set(1, coseKey); // COSE_Key
+      cnf.set(1, publicOnlyCoseKey); // COSE_Key
       result.set(8, cnf);  // cnf claim
 
-      // Process user claims
+      // Process user claims - parse special comment format like "/ iss / 1"
       for (const [key, value] of Object.entries(claims)) {
-        const claimKey = isNaN(key) ? key : parseInt(key);
+        const claimKey = parseClaimKey(key);
         result.set(claimKey, transformValue(value));
       }
 
       return result;
+    }
+
+    function parseClaimKey(key) {
+      // Handle spec format like "/ iss / 1" or "/ most_recent_inspection_passed / 500"
+      const match = key.match(/\/\s*\w+\s*\/\s*(\d+)/);
+      if (match) {
+        return parseInt(match[1]);
+      }
+      // Try to parse as number
+      if (!isNaN(key)) {
+        return parseInt(key);
+      }
+      // Return as string
+      return key;
     }
 
     function transformValue(value) {
@@ -802,29 +938,32 @@
       return value;
     }
 
+    // ==========================================================================
     // Issue SD-CWT
+    // ==========================================================================
     async function issueCWT() {
       try {
         if (!issuerKeyPair) {
-          throw new Error('Please generate an issuer key first');
+          throw new Error('Please load or generate an issuer key first');
         }
 
         const holderPubHex = document.getElementById('holderPublicKeyForIssuer').value;
         if (!holderPubHex) {
-          throw new Error('Please provide holder public key (generate holder key first)');
+          throw new Error('Please provide holder public key (load or generate holder key first)');
         }
 
         const claimsJson = document.getElementById('issuerClaims').value;
         const userClaims = JSON.parse(claimsJson);
         
-        const holderPublicKey = deserializePublicKey(holderPubHex);
+        // Parse the holder public key from hex-encoded COSE Key
+        const holderPublicKey = SDCWT.coseKeyFromHex(holderPubHex);
         const claims = transformClaimsForIssue(userClaims, holderPublicKey);
 
-        // Issue the SD-CWT
+        // Issue the SD-CWT using the issuer's algorithm
         const result = await SDCWT.Issuer.issue({
           claims,
           privateKey: issuerKeyPair.privateKey,
-          algorithm: 'ES256',
+          algorithm: issuerAlgorithm,
         });
 
         issuedToken = result.token;
@@ -835,7 +974,7 @@
         document.getElementById('issuedCwtHex').textContent = SDCWT.Hex.encode(result.token);
         
         showStatus('issuerStatus', 
-          `Issued successfully! ${disclosures.length} disclosure(s) generated.`, 'success');
+          `Issued successfully with ${issuerAlgorithm}! ${disclosures.length} disclosure(s) generated.`, 'success');
 
         // Auto-fill holder input
         document.getElementById('holderCwt').value = SDCWT.Hex.encode(result.token);
@@ -889,11 +1028,13 @@
       return String(value);
     }
 
-    // Create presentation
+    // ==========================================================================
+    // Create Presentation (Holder)
+    // ==========================================================================
     async function createPresentation() {
       try {
         if (!holderKeyPair) {
-          throw new Error('Please generate a holder key first');
+          throw new Error('Please load or generate a holder key first');
         }
 
         const cwtHex = document.getElementById('holderCwt').value;
@@ -918,14 +1059,14 @@
           }
         });
 
-        // Create presentation
+        // Create presentation using holder's algorithm
         const presentation = await SDCWT.Holder.present({
           token,
           selectedDisclosures,
           holderPrivateKey: holderKeyPair.privateKey,
           audience,
           nonce,
-          algorithm: 'ES256',
+          algorithm: holderAlgorithm,
         });
 
         // Display result
@@ -933,7 +1074,7 @@
         document.getElementById('presentationHex').textContent = SDCWT.Hex.encode(presentation);
         
         showStatus('holderStatus', 
-          `Presentation created with ${selectedDisclosures.length} disclosure(s)`, 'success');
+          `Presentation created with ${holderAlgorithm}, ${selectedDisclosures.length} disclosure(s)`, 'success');
 
         // Auto-fill verifier input
         document.getElementById('verifierPresentation').value = SDCWT.Hex.encode(presentation);
@@ -944,7 +1085,9 @@
       }
     }
 
-    // Verify presentation
+    // ==========================================================================
+    // Verify Presentation (Verifier)
+    // ==========================================================================
     async function verifyPresentation() {
       try {
         const presentationHex = document.getElementById('verifierPresentation').value;
@@ -954,7 +1097,7 @@
 
         const issuerPubHex = document.getElementById('issuerPublicKeyForVerifier').value;
         if (!issuerPubHex) {
-          throw new Error('Please provide issuer public key');
+          throw new Error('Please provide issuer public key (as hex-encoded COSE Key)');
         }
 
         const expectedAudience = document.getElementById('verifierAudience').value;
@@ -965,7 +1108,9 @@
         const expectedNonce = document.getElementById('verifierNonce').value || undefined;
         
         const presentation = SDCWT.Hex.decode(presentationHex);
-        const issuerPublicKey = deserializePublicKey(issuerPubHex);
+        
+        // Parse issuer public key from hex-encoded COSE Key
+        const issuerPublicKey = SDCWT.coseKeyFromHex(issuerPubHex);
 
         // Verify
         const result = await SDCWT.Verifier.verify({
@@ -1029,9 +1174,13 @@
       });
     }
 
-    // Auto-generate keys on load
-    Promise.all([generateIssuerKey(), generateHolderKey()]).then(() => {
-      console.log('Keys generated');
+    // ==========================================================================
+    // Initialize with Spec Keys on load
+    // ==========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSpecIssuerKey();
+      loadSpecHolderKey();
+      console.log('Loaded spec keys from Appendix C');
     });
   </script>
 </body>

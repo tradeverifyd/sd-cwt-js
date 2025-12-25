@@ -3406,11 +3406,7 @@ ${result.issues.join("\n")}`);
       if (!holderPrivateKey) {
         throw new Error("holderPrivateKey is REQUIRED to sign the SD-KBT");
       }
-      console.log("[Holder.present] token type:", token?.constructor?.name);
-      console.log("[Holder.present] token length:", token?.length);
-      console.log("[Holder.present] token instanceof Uint8Array:", token instanceof Uint8Array);
       const tokenBytes = Buffer2.isBuffer(token) ? new Uint8Array(token.buffer, token.byteOffset, token.length) : token instanceof Uint8Array ? token : new Uint8Array(token);
-      console.log("[Holder.present] tokenBytes length:", tokenBytes?.length);
       const disclosureBytes = selectedDisclosures.map(
         (d5) => Buffer2.isBuffer(d5) ? new Uint8Array(d5.buffer, d5.byteOffset, d5.length) : d5 instanceof Uint8Array ? d5 : new Uint8Array(d5)
       );
@@ -3457,16 +3453,30 @@ ${result.issues.join("\n")}`);
       return validDisclosures;
     }
   };
+  function copyBytes2(data) {
+    if (!data || data.length === 0) {
+      return data;
+    }
+    if (data instanceof Uint8Array) {
+      const copy = new Uint8Array(data.length);
+      copy.set(data);
+      return copy;
+    }
+    if (ArrayBuffer.isView(data)) {
+      const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      const copy = new Uint8Array(view.length);
+      copy.set(view);
+      return copy;
+    }
+    return data;
+  }
   function embedDisclosuresInToken(token, disclosures) {
     const decoded = l5(token, cborDecodeOptions2);
     const coseArray = decoded.contents || decoded;
-    const [protectedBytes, unprotectedMap, payload, signature] = coseArray;
-    console.log("[embedDisclosuresInToken] signature type:", signature?.constructor?.name);
-    console.log("[embedDisclosuresInToken] signature length:", signature?.length);
-    console.log("[embedDisclosuresInToken] signature instanceof Uint8Array:", signature instanceof Uint8Array);
-    if (signature && signature.length > 0) {
-      console.log("[embedDisclosuresInToken] first 5 bytes:", Array.from(signature.slice(0, 5)).map((b4) => b4.toString(16).padStart(2, "0")).join(""));
-    }
+    const [protectedBytesRaw, unprotectedMap, payloadRaw, signatureRaw] = coseArray;
+    const protectedBytes = copyBytes2(protectedBytesRaw);
+    const payload = copyBytes2(payloadRaw);
+    const signature = copyBytes2(signatureRaw);
     const newUnprotected = unprotectedMap instanceof Map ? new Map(unprotectedMap) : /* @__PURE__ */ new Map();
     newUnprotected.set(HeaderParam2.SdClaims, disclosures);
     const newCoseArray = [protectedBytes, newUnprotected, payload, signature];

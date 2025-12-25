@@ -218,17 +218,10 @@ export const Holder = {
       throw new Error('holderPrivateKey is REQUIRED to sign the SD-KBT');
     }
 
-    // Debug: Log token info at start
-    console.log('[Holder.present] token type:', token?.constructor?.name);
-    console.log('[Holder.present] token length:', token?.length);
-    console.log('[Holder.present] token instanceof Uint8Array:', token instanceof Uint8Array);
-
     // Ensure token is Uint8Array
     const tokenBytes = Buffer.isBuffer(token) 
       ? new Uint8Array(token.buffer, token.byteOffset, token.length)
       : (token instanceof Uint8Array ? token : new Uint8Array(token));
-    
-    console.log('[Holder.present] tokenBytes length:', tokenBytes?.length);
     
     // Ensure disclosures are Uint8Arrays
     const disclosureBytes = selectedDisclosures.map(d => 
@@ -312,21 +305,39 @@ export const Holder = {
  * @param {Uint8Array[]} disclosures - The disclosures to embed
  * @returns {Uint8Array} The SD-CWT with disclosures in unprotected header
  */
+/**
+ * Copy bytes from a potentially shared buffer to ensure independence
+ */
+function copyBytes(data) {
+  if (!data || data.length === 0) {
+    return data;
+  }
+  if (data instanceof Uint8Array) {
+    const copy = new Uint8Array(data.length);
+    copy.set(data);
+    return copy;
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const copy = new Uint8Array(view.length);
+    copy.set(view);
+    return copy;
+  }
+  return data;
+}
+
 function embedDisclosuresInToken(token, disclosures) {
   // Decode the COSE_Sign1 structure
   const decoded = cbor.decode(token, sdCwt.cborDecodeOptions);
   const coseArray = decoded.contents || decoded;
   
   // COSE_Sign1: [protected, unprotected, payload, signature]
-  const [protectedBytes, unprotectedMap, payload, signature] = coseArray;
+  const [protectedBytesRaw, unprotectedMap, payloadRaw, signatureRaw] = coseArray;
   
-  // Debug: Log signature info
-  console.log('[embedDisclosuresInToken] signature type:', signature?.constructor?.name);
-  console.log('[embedDisclosuresInToken] signature length:', signature?.length);
-  console.log('[embedDisclosuresInToken] signature instanceof Uint8Array:', signature instanceof Uint8Array);
-  if (signature && signature.length > 0) {
-    console.log('[embedDisclosuresInToken] first 5 bytes:', Array.from(signature.slice(0, 5)).map(b => b.toString(16).padStart(2, '0')).join(''));
-  }
+  // Create copies of byte arrays to avoid issues with views over shared buffers
+  const protectedBytes = copyBytes(protectedBytesRaw);
+  const payload = copyBytes(payloadRaw);
+  const signature = copyBytes(signatureRaw);
   
   // Add disclosures to unprotected header
   const newUnprotected = unprotectedMap instanceof Map ? new Map(unprotectedMap) : new Map();
