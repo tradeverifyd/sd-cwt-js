@@ -17,6 +17,7 @@ import {
 } from '../src/api.js';
 
 import * as sdCwt from '../src/sd-cwt.js';
+import * as coseSign1 from '../src/cose-sign1.js';
 import * as cbor from 'cbor2';
 
 /**
@@ -410,6 +411,640 @@ describe('SD-CWT Spec Test Vectors', () => {
         }
       }
       assert.ok(hasRedactedKeysKey);
+    });
+
+  });
+
+  describe('IANA Considerations - Header Parameters (Section 17.1)', () => {
+    // Tests for COSE Header Parameters defined in IANA considerations
+    // Note: sd_claims is added during presentation, not issuance
+
+    it('should set sd_alg (label 18) in protected header when disclosures exist', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(501), 'secret-value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Parse the COSE_Sign1 structure to check headers
+      const headers = coseSign1.getHeaders(token);
+      
+      // sd_alg (18) should be in protected header
+      assert.ok(headers.protectedHeaders.has(18), 'sd_alg (18) must be in protected header');
+      
+      // The value should be -16 (SHA-256)
+      const sdAlgHeader = headers.protectedHeaders.get(18);
+      assert.strictEqual(sdAlgHeader, -16, 'sd_alg value should be -16 (SHA-256)');
+    });
+
+    it('should set typ (label 16) to application/sd-cwt in protected header', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, 'public-value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      const headers = coseSign1.getHeaders(token);
+      
+      // typ (16) should be in protected header
+      assert.ok(headers.protectedHeaders.has(16), 'typ (16) must be in protected header');
+      
+      const typHeader = headers.protectedHeaders.get(16);
+      assert.strictEqual(typHeader, 'application/sd-cwt');
+    });
+
+    it('should set sd_claims (label 17) in SD-CWT during presentation', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(501), 'secret-value'],
+        [toBeRedacted(502), 'another-secret'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // At issuance, disclosures are returned separately (not in token headers)
+      assert.strictEqual(disclosures.length, 2);
+
+      // Create presentation with selected disclosures
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      // Parse the SD-KBT to extract the embedded SD-CWT
+      const kbtDecoded = cbor.decode(kbt);
+      assert.ok(kbtDecoded instanceof cbor.Tag);
+      assert.strictEqual(kbtDecoded.tag, 18);
+      
+      // Get the kcwt from KBT protected header
+      const kbtProtectedBytes = kbtDecoded.contents[0];
+      const kbtProtectedHeader = cbor.decode(kbtProtectedBytes);
+      
+      // kcwt (13) contains the SD-CWT
+      const sdCwtBytes = kbtProtectedHeader.get(13);
+      assert.ok(sdCwtBytes);
+      
+      // Parse the SD-CWT inside
+      const sdCwtDecoded = cbor.decode(sdCwtBytes);
+      assert.ok(sdCwtDecoded instanceof cbor.Tag);
+      
+      // Get the unprotected header of the SD-CWT
+      const sdCwtUnprotected = sdCwtDecoded.contents[1];
+      
+      // sd_claims (17) should be present with the disclosures
+      assert.ok(sdCwtUnprotected.has(17), 'sd_claims (17) must be in SD-CWT unprotected header during presentation');
+      
+      const sdClaimsHeader = sdCwtUnprotected.get(17);
+      assert.ok(Array.isArray(sdClaimsHeader));
+      assert.strictEqual(sdClaimsHeader.length, 2, 'All selected disclosures should be in sd_claims');
+    });
+
+    it('should have empty sd_claims in presentation when no disclosures selected', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(501), 'secret-value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Create presentation with NO disclosures
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],  // Empty - don't disclose anything
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      // Parse and check the SD-CWT inside the SD-KBT
+      const kbtDecoded = cbor.decode(kbt);
+      const kbtProtectedBytes = kbtDecoded.contents[0];
+      const kbtProtectedHeader = cbor.decode(kbtProtectedBytes);
+      const sdCwtBytes = kbtProtectedHeader.get(13);
+      const sdCwtDecoded = cbor.decode(sdCwtBytes);
+      const sdCwtUnprotected = sdCwtDecoded.contents[1];
+      
+      // sd_claims should be empty array
+      const sdClaimsHeader = sdCwtUnprotected.get(17);
+      assert.ok(Array.isArray(sdClaimsHeader));
+      assert.strictEqual(sdClaimsHeader.length, 0, 'sd_claims should be empty when no disclosures selected');
+    });
+
+  });
+
+  describe('IANA Considerations - CBOR Simple Values (Section 17.2)', () => {
+    // simple(59) for redacted claim keys
+
+    it('should use simple(59) as map key for redacted claim keys array', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(500), 'secret-value'],
+        [501, 'public-value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      const parsed = Holder.parse(token);
+      
+      // Find simple(59) key in the claims
+      let foundSimple59 = false;
+      for (const key of parsed.claims.keys()) {
+        if (key instanceof cbor.Simple && key.value === 59) {
+          foundSimple59 = true;
+          // Value should be an array of hashes
+          const hashes = parsed.claims.get(key);
+          assert.ok(Array.isArray(hashes));
+          break;
+        }
+      }
+      assert.ok(foundSimple59, 'Claims must contain simple(59) key for redacted keys');
+    });
+
+  });
+
+  describe('IANA Considerations - CBOR Tags (Section 17.3)', () => {
+    // Tag 58: To Be Redacted
+    // Tag 60: Redacted Claim Element
+
+    it('should use Tag 58 for marking claims to be redacted (pre-issuance)', () => {
+      const tagged = sdCwt.toBeRedacted(500);
+      
+      assert.ok(tagged instanceof cbor.Tag);
+      assert.strictEqual(tagged.tag, 58, 'toBeRedacted must use Tag 58');
+      assert.strictEqual(tagged.contents, 500);
+    });
+
+    it('should use Tag 60 for redacted array elements (post-issuance)', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted('secret-element'),
+          'public-element',
+        ]],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      const parsed = Holder.parse(token);
+      const array = parsed.claims.get(502);
+      
+      // First element should be Tag 60
+      assert.ok(array[0] instanceof cbor.Tag);
+      assert.strictEqual(array[0].tag, 60, 'Redacted array element must use Tag 60');
+      
+      // The contents should be the hash (byte string)
+      assert.ok(
+        array[0].contents instanceof Uint8Array || Buffer.isBuffer(array[0].contents),
+        'Tag 60 contents must be a byte string (hash)'
+      );
+    });
+
+    it('should have Tag 60 contents matching disclosure hash', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [toBeRedacted('secret-value')]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      assert.strictEqual(disclosures.length, 1);
+
+      const parsed = Holder.parse(token);
+      const array = parsed.claims.get(502);
+      
+      // Get the hash from Tag 60
+      const tagHash = array[0].contents;
+      
+      // Compute the expected hash
+      const expectedHash = sdCwt.hashDisclosure(disclosures[0], 'sha256');
+      
+      // They should match
+      assert.deepStrictEqual(
+        new Uint8Array(tagHash),
+        expectedHash,
+        'Tag 60 hash must match disclosure hash'
+      );
+    });
+
+  });
+
+  describe('Disclosure format verification (Section 5)', () => {
+    // SD-CWT spec: disclosure format is [salt, value, key] for named claims
+    // and [salt, value] for array elements
+
+    it('should create named claim disclosure with format [salt, value, key]', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(501), 'ABCD-123456'],
+      ]);
+
+      const { disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      assert.strictEqual(disclosures.length, 1);
+      
+      // Decode and verify structure matches spec: [salt, value, key]
+      const decoded = cbor.decode(disclosures[0]);
+      assert.ok(Array.isArray(decoded));
+      assert.strictEqual(decoded.length, 3, 'Named claim disclosure must have 3 elements');
+      
+      // Per spec: [salt, value, key]
+      const [salt, value, key] = decoded;
+      assert.ok(salt instanceof Uint8Array || Buffer.isBuffer(salt), 'salt must be bytes');
+      assert.strictEqual(salt.length, 16, 'salt must be 16 bytes');
+      assert.strictEqual(value, 'ABCD-123456', 'value must be the claim value');
+      assert.strictEqual(key, 501, 'key must be the claim key');
+    });
+
+    it('should create array element disclosure with format [salt, value] (no key)', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted(1549560720),  // redactable date
+          1674004740,                // non-redactable date
+        ]],
+      ]);
+
+      const { disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      assert.strictEqual(disclosures.length, 1);
+      
+      // Decode and verify structure matches spec: [salt, value] for array elements
+      const decoded = cbor.decode(disclosures[0]);
+      assert.ok(Array.isArray(decoded));
+      assert.strictEqual(decoded.length, 2, 'Array element disclosure must have 2 elements (no key)');
+      
+      // Per spec: [salt, value] - no key for array elements
+      const [salt, value] = decoded;
+      assert.ok(salt instanceof Uint8Array || Buffer.isBuffer(salt), 'salt must be bytes');
+      assert.strictEqual(salt.length, 16, 'salt must be 16 bytes');
+      assert.strictEqual(value, 1549560720, 'value must be the array element value');
+    });
+
+    it('should create string-keyed claim disclosure with format [salt, value, key]', async () => {
+      const claims = new Map([
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [503, new Map([
+          ['country', 'us'],
+          [toBeRedacted('region'), 'ca'],
+        ])],
+      ]);
+
+      const { disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      assert.strictEqual(disclosures.length, 1);
+      
+      // Decode and verify structure
+      const decoded = cbor.decode(disclosures[0]);
+      assert.ok(Array.isArray(decoded));
+      assert.strictEqual(decoded.length, 3, 'String-keyed claim disclosure must have 3 elements');
+      
+      // Per spec: [salt, value, key]
+      const [salt, value, key] = decoded;
+      assert.ok(salt instanceof Uint8Array || Buffer.isBuffer(salt));
+      assert.strictEqual(value, 'ca');
+      assert.strictEqual(key, 'region');
+    });
+
+  });
+
+  describe('Array element disclosure (Section 13.1)', () => {
+    // The minimal spanning example shows arrays with redacted elements
+
+    it('should issue and verify with redacted array elements', async () => {
+      // From Section 13.1: inspection_dates array with some redacted elements
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [2, 'https://device.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, true],
+        // inspection_dates with redactable and non-redactable elements
+        [502, [
+          toBeRedacted(1549560720),  // 7-Feb-2019 - redactable
+          toBeRedacted(1612560720),  // 4-Feb-2021 - redactable  
+          1674004740,                // 2023-01-17 - always visible
+        ]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Should have 2 disclosures (one for each redacted array element)
+      assert.strictEqual(disclosures.length, 2);
+
+      // Parse the issued token
+      const parsed = Holder.parse(token);
+      const dates = parsed.claims.get(502);
+      
+      assert.ok(Array.isArray(dates));
+      assert.strictEqual(dates.length, 3);
+      
+      // First two should be redacted (Tag 60)
+      assert.ok(sdCwt.isRedactedClaimElement(dates[0]));
+      assert.ok(sdCwt.isRedactedClaimElement(dates[1]));
+      // Third should be visible
+      assert.strictEqual(dates[2], 1674004740);
+    });
+
+    it('should allow selective disclosure of individual array elements', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted('element-0'),
+          toBeRedacted('element-1'),
+          toBeRedacted('element-2'),
+          'always-visible',
+        ]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      assert.strictEqual(disclosures.length, 3);
+
+      // Decode each disclosure to find the one for 'element-1'
+      let element1Disclosure = null;
+      for (const disclosure of disclosures) {
+        const decoded = cbor.decode(disclosure);
+        if (decoded[1] === 'element-1') {
+          element1Disclosure = disclosure;
+          break;
+        }
+      }
+      assert.ok(element1Disclosure, 'Should find disclosure for element-1');
+
+      // Present with only element-1 disclosed
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [element1Disclosure],
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      const arr = result.claims.get(502);
+      assert.ok(Array.isArray(arr));
+      
+      // Only element-1 should be disclosed
+      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
+      assert.strictEqual(arr[1], 'element-1');
+      assert.ok(sdCwt.isRedactedClaimElement(arr[2]));
+      assert.strictEqual(arr[3], 'always-visible');
+    });
+
+    it('should disclose all array elements when all disclosures provided', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted(1549560720),
+          toBeRedacted(1612560720),
+          1674004740,
+        ]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Present with ALL disclosures
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      const arr = result.claims.get(502);
+      assert.ok(Array.isArray(arr));
+      assert.strictEqual(arr.length, 3);
+      
+      // All elements should be visible
+      assert.strictEqual(arr[0], 1549560720);
+      assert.strictEqual(arr[1], 1612560720);
+      assert.strictEqual(arr[2], 1674004740);
+    });
+
+    it('should keep array elements redacted when disclosures withheld', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted('secret-date-1'),
+          toBeRedacted('secret-date-2'),
+          'public-date',
+        ]],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Present with NO disclosures (keep all redacted)
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      const arr = result.claims.get(502);
+      assert.ok(Array.isArray(arr));
+      assert.strictEqual(arr.length, 3);
+      
+      // First two should still be redacted
+      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
+      assert.ok(sdCwt.isRedactedClaimElement(arr[1]));
+      // Third always visible
+      assert.strictEqual(arr[2], 'public-date');
+    });
+
+  });
+
+  describe('Combined named claims and array elements (Section 13.1)', () => {
+    // Full minimal spanning example with both types of disclosures
+
+    it('should handle mixed disclosure types in a single SD-CWT', async () => {
+      // Exact structure from Section 13.1
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [2, 'https://device.example'],
+        [4, 1725330600],
+        [5, 1725243900],
+        [6, 1725244200],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, true],
+        // Named claim with redactable key
+        [toBeRedacted(501), 'ABCD-123456'],
+        // Array with redactable elements
+        [502, [
+          toBeRedacted(1549560720),
+          toBeRedacted(1612560720),
+          1674004740,
+        ]],
+        // Nested map with redactable claims
+        [503, new Map([
+          ['country', 'us'],
+          [toBeRedacted('region'), 'ca'],
+          [toBeRedacted('postal_code'), '94188'],
+        ])],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Should have 5 disclosures total:
+      // 1 for claim 501, 2 for array elements, 2 for nested map claims
+      assert.strictEqual(disclosures.length, 5);
+
+      // Categorize disclosures by type
+      let namedClaimCount = 0;
+      let arrayElementCount = 0;
+      
+      for (const disclosure of disclosures) {
+        const decoded = cbor.decode(disclosure);
+        if (decoded.length === 2) {
+          arrayElementCount++;
+        } else if (decoded.length === 3) {
+          namedClaimCount++;
+        }
+      }
+      
+      assert.strictEqual(arrayElementCount, 2, 'Should have 2 array element disclosures');
+      assert.strictEqual(namedClaimCount, 3, 'Should have 3 named claim disclosures');
+    });
+
+    it('should support partial disclosure of both types', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [toBeRedacted(501), 'LICENSE-NUMBER'],
+        [502, [
+          toBeRedacted('date-1'),
+          toBeRedacted('date-2'),
+        ]],
+        [503, new Map([
+          ['country', 'us'],
+          [toBeRedacted('region'), 'ca'],
+        ])],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+      });
+
+      // Select only: claim 501 and region
+      // Should NOT include array element disclosures
+      const selectedDisclosures = Holder.selectDisclosures(disclosures, [501, 'region']);
+      
+      assert.strictEqual(selectedDisclosures.length, 2);
+
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      // Claim 501 should be disclosed
+      assert.strictEqual(result.claims.get(501), 'LICENSE-NUMBER');
+      
+      // Array elements should still be redacted
+      const arr = result.claims.get(502);
+      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
+      assert.ok(sdCwt.isRedactedClaimElement(arr[1]));
+      
+      // Nested region should be disclosed
+      const location = result.claims.get(503);
+      assert.strictEqual(location.get('country'), 'us');
+      assert.strictEqual(location.get('region'), 'ca');
     });
 
   });
