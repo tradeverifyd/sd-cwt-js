@@ -303,7 +303,7 @@ export function decode(coseSign1) {
 }
 
 /**
- * ECDSA signing using Node.js crypto
+ * ECDSA signing using Node.js crypto (or browser shim)
  */
 async function signECDSA(data, key, algInfo) {
   const jwk = {
@@ -315,7 +315,8 @@ async function signECDSA(data, key, algInfo) {
   };
 
   const privateKey = crypto.createPrivateKey({ key: jwk, format: 'jwk' });
-  const signature = crypto.sign(null, data, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  // Await the signature - browser shim returns a Promise, Node.js returns sync
+  const signature = await crypto.sign(null, data, { key: privateKey, dsaEncoding: 'ieee-p1363' });
   
   return new Uint8Array(signature);
 }
@@ -348,7 +349,8 @@ async function verifyECDSA(data, signature, key, algInfo) {
   const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const sigBuffer = Buffer.from(sigBytes);
   
-  return crypto.verify(null, data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuffer);
+  // Await the result - browser shim returns a Promise, Node.js returns sync
+  return await crypto.verify(null, data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuffer);
 }
 
 /**

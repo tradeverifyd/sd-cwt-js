@@ -2420,7 +2420,7 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
       y: Buffer2.from(key.y).toString("base64url")
     };
     const privateKey = crypto_browser_default.createPrivateKey({ key: jwk, format: "jwk" });
-    const signature = crypto_browser_default.sign(null, data, { key: privateKey, dsaEncoding: "ieee-p1363" });
+    const signature = await crypto_browser_default.sign(null, data, { key: privateKey, dsaEncoding: "ieee-p1363" });
     return new Uint8Array(signature);
   }
   async function verifyECDSA(data, signature, key, algInfo) {
@@ -2444,7 +2444,7 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     };
     const publicKey = crypto_browser_default.createPublicKey({ key: jwk, format: "jwk" });
     const sigBuffer = Buffer2.from(sigBytes);
-    return crypto_browser_default.verify(null, data, { key: publicKey, dsaEncoding: "ieee-p1363" }, sigBuffer);
+    return await crypto_browser_default.verify(null, data, { key: publicKey, dsaEncoding: "ieee-p1363" }, sigBuffer);
   }
   function generateKeyPair(alg = Alg.ES256) {
     const algInfo = AlgInfo[alg];
