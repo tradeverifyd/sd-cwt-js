@@ -59,6 +59,7 @@ var SDCWT = (() => {
     coseKeyToInternal: () => coseKeyToInternal,
     coseSign1: () => cose_sign1_exports,
     deserializeCoseKey: () => deserializeCoseKey,
+    ednCbor: () => lib_exports,
     formatClaims: () => formatClaims,
     generateKeyPair: () => generateKeyPair2,
     getAlgorithmFromCoseKey: () => getAlgorithmFromCoseKey,
@@ -3871,7 +3872,8 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
     cborDecodeOptions: cborDecodeOptions2
   };
 
-  // src/browser.js
+  // src/edn.js
+  var Buffer3 = globalThis.Buffer;
   var Hex = {
     /**
      * Encode bytes to hex string
@@ -3898,20 +3900,56 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
       return bytes;
     }
   };
+  var CWT_CLAIM_NAMES = {
+    1: "iss",
+    2: "sub",
+    3: "aud",
+    4: "exp",
+    5: "nbf",
+    6: "iat",
+    7: "cti",
+    8: "cnf",
+    39: "cnonce"
+  };
+  function getClaimComment(key) {
+    const name = CWT_CLAIM_NAMES[key];
+    return name ? `/ ${name} / ` : "";
+  }
   var EDN = {
     /**
      * Convert a JavaScript value to EDN string
      * @param {any} value 
-     * @param {number} indent 
+     * @param {object} options
+     * @param {number} options.indent - spaces per indent level (default 2)
      * @returns {string}
      */
-    stringify(value, indent = 0) {
-      return ednStringify(value, indent);
+    stringify(value, options = {}) {
+      const indent = options.indent ?? 2;
+      return ednStringify(value, indent, 0);
+    },
+    /**
+     * Parse an EDN string into JavaScript values
+     * Uses cbor2.Tag for CBOR tags, Map for objects, arrays for arrays
+     * @param {string} ednString 
+     * @returns {any}
+     */
+    parse(ednString) {
+      return parseEdn(ednString);
+    },
+    /**
+     * Format a CWT claims Map to EDN with named comments for known claims
+     * Comments are only added at the top level
+     * @param {Map} claims 
+     * @returns {string}
+     */
+    formatClaims(claims) {
+      return formatMapWithComments(claims, 0, true);
     }
   };
-  function ednStringify(value, indent = 0, depth = 0) {
-    const pad = "  ".repeat(depth);
-    const pad1 = "  ".repeat(depth + 1);
+  function ednStringify(value, indent, depth) {
+    const padChar = " ".repeat(indent);
+    const pad = padChar.repeat(depth);
+    const pad1 = padChar.repeat(depth + 1);
     if (value === null) {
       return "null";
     }
@@ -3927,7 +3965,7 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
     if (typeof value === "string") {
       return JSON.stringify(value);
     }
-    if (value instanceof Uint8Array || Buffer2.isBuffer(value)) {
+    if (value instanceof Uint8Array || Buffer3 && Buffer3.isBuffer && Buffer3.isBuffer(value)) {
       const hex = Hex.encode(value);
       if (hex.length <= 64) {
         return `h'${hex}'`;
@@ -3983,25 +4021,273 @@ ${pad}}`;
     }
     return String(value);
   }
-  var CWT_CLAIM_NAMES = {
-    1: "iss",
-    2: "sub",
-    3: "aud",
-    4: "exp",
-    5: "nbf",
-    6: "iat",
-    7: "cti",
-    8: "cnf",
-    39: "cnonce"
-  };
-  function formatClaims(claims) {
-    const formatted = /* @__PURE__ */ new Map();
-    for (const [key, value] of claims) {
-      const name = CWT_CLAIM_NAMES[key] || key;
-      const displayKey = typeof name === "string" ? `/ ${name} / ${key}` : key;
-      formatted.set(displayKey, value);
+  function formatMapWithComments(map, depth, addComments = false) {
+    if (!(map instanceof Map) || map.size === 0) {
+      return "{}";
     }
-    return EDN.stringify(formatted);
+    const pad = "  ".repeat(depth);
+    const pad1 = "  ".repeat(depth + 1);
+    const entries = [];
+    for (const [key, value] of map) {
+      const comment = addComments && typeof key === "number" ? getClaimComment(key) : "";
+      const keyStr = formatValueWithComments(key, depth + 1);
+      const valStr = formatValueWithComments(value, depth + 1);
+      entries.push(`${pad1}${comment}${keyStr}: ${valStr}`);
+    }
+    return `{
+${entries.join(",\n")}
+${pad}}`;
+  }
+  function formatValueWithComments(value, depth) {
+    const pad = "  ".repeat(depth);
+    const pad1 = "  ".repeat(depth + 1);
+    if (value === null) return "null";
+    if (value === void 0) return "undefined";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "string") return JSON.stringify(value);
+    if (value instanceof Uint8Array || Buffer3 && Buffer3.isBuffer && Buffer3.isBuffer(value)) {
+      const hex = Hex.encode(value);
+      if (hex.length <= 64) {
+        return `h'${hex}'`;
+      }
+      const lines = [];
+      for (let i3 = 0; i3 < hex.length; i3 += 64) {
+        lines.push(hex.slice(i3, i3 + 64));
+      }
+      return `h'${lines.join("\n" + pad1)}'`;
+    }
+    if (value instanceof i) {
+      const tagContent = formatValueWithComments(value.contents, depth);
+      return `${value.tag}(${tagContent})`;
+    }
+    if (value && typeof value === "object" && value.type === "simple") {
+      return `simple(${value.value})`;
+    }
+    if (value instanceof Map) {
+      return formatMapWithComments(value, depth, false);
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "[]";
+      const items = value.map((v2) => `${pad1}${formatValueWithComments(v2, depth + 1)}`);
+      return `[
+${items.join(",\n")}
+${pad}]`;
+    }
+    if (typeof value === "object") {
+      const keys = Object.keys(value);
+      if (keys.length === 0) return "{}";
+      const entries = keys.map((k4) => {
+        const valStr = formatValueWithComments(value[k4], depth + 1);
+        return `${pad1}"${k4}": ${valStr}`;
+      });
+      return `{
+${entries.join(",\n")}
+${pad}}`;
+    }
+    return String(value);
+  }
+  function parseEdn(ednString) {
+    let pos = 0;
+    const src = ednString;
+    function skipWhitespace() {
+      while (pos < src.length) {
+        const ch = src[pos];
+        if (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
+          pos++;
+        } else {
+          break;
+        }
+      }
+    }
+    function skipComment() {
+      if (pos < src.length && src[pos] === "/") {
+        pos++;
+        while (pos < src.length) {
+          if (src[pos] === "/" && pos > 0 && src[pos - 1] === " ") {
+            pos++;
+            break;
+          }
+          pos++;
+        }
+        return true;
+      }
+      return false;
+    }
+    function skipWhitespaceAndComments() {
+      while (pos < src.length) {
+        skipWhitespace();
+        if (pos < src.length && src[pos] === "/") {
+          skipComment();
+        } else {
+          break;
+        }
+      }
+    }
+    function parseValue() {
+      skipWhitespaceAndComments();
+      if (pos >= src.length) throw new Error("Unexpected end of input");
+      const ch = src[pos];
+      if (ch === '"') {
+        return parseString();
+      }
+      if (ch === "{") {
+        return parseMap();
+      }
+      if (ch === "[") {
+        return parseArray();
+      }
+      if (/\d/.test(ch)) {
+        return parseNumberOrTag();
+      }
+      if (/[a-z]/.test(ch)) {
+        return parseKeywordOrHex();
+      }
+      if (ch === "-") {
+        return parseNumber();
+      }
+      throw new Error(`Unexpected character '${ch}' at position ${pos}`);
+    }
+    function parseString() {
+      pos++;
+      let result = "";
+      while (pos < src.length && src[pos] !== '"') {
+        if (src[pos] === "\\") {
+          pos++;
+          if (pos >= src.length) throw new Error("Unterminated string");
+          const escape = src[pos];
+          if (escape === "n") result += "\n";
+          else if (escape === "t") result += "	";
+          else if (escape === "r") result += "\r";
+          else if (escape === '"') result += '"';
+          else if (escape === "\\") result += "\\";
+          else result += escape;
+        } else {
+          result += src[pos];
+        }
+        pos++;
+      }
+      if (pos >= src.length) throw new Error("Unterminated string");
+      pos++;
+      return result;
+    }
+    function parseNumber() {
+      const start = pos;
+      if (src[pos] === "-") pos++;
+      while (pos < src.length && /\d/.test(src[pos])) pos++;
+      if (pos < src.length && src[pos] === ".") {
+        pos++;
+        while (pos < src.length && /\d/.test(src[pos])) pos++;
+      }
+      const numStr = src.slice(start, pos);
+      return numStr.includes(".") ? parseFloat(numStr) : parseInt(numStr, 10);
+    }
+    function parseNumberOrTag() {
+      const start = pos;
+      while (pos < src.length && /\d/.test(src[pos])) pos++;
+      let hasDecimal = false;
+      if (pos < src.length && src[pos] === ".") {
+        if (pos + 1 < src.length && /\d/.test(src[pos + 1])) {
+          hasDecimal = true;
+          pos++;
+          while (pos < src.length && /\d/.test(src[pos])) pos++;
+        }
+      }
+      const numStr = src.slice(start, pos);
+      if (hasDecimal) {
+        return parseFloat(numStr);
+      }
+      skipWhitespaceAndComments();
+      if (pos < src.length && src[pos] === "(") {
+        pos++;
+        const tagNumber = parseInt(numStr, 10);
+        const content = parseValue();
+        skipWhitespaceAndComments();
+        if (src[pos] !== ")") throw new Error("Expected ) after tag content");
+        pos++;
+        return new i(tagNumber, content);
+      }
+      return parseInt(numStr, 10);
+    }
+    function parseKeywordOrHex() {
+      if (src[pos] === "h" && pos + 1 < src.length && src[pos + 1] === "'") {
+        return parseHexBytes();
+      }
+      if (src.slice(pos, pos + 7) === "simple(") {
+        return parseSimple();
+      }
+      const start = pos;
+      while (pos < src.length && /[a-z_]/.test(src[pos])) pos++;
+      const keyword = src.slice(start, pos);
+      if (keyword === "true") return true;
+      if (keyword === "false") return false;
+      if (keyword === "null") return null;
+      throw new Error(`Unknown keyword: ${keyword}`);
+    }
+    function parseHexBytes() {
+      pos += 2;
+      const start = pos;
+      while (pos < src.length && src[pos] !== "'") pos++;
+      const hexStr = src.slice(start, pos).replace(/\s/g, "");
+      pos++;
+      return Hex.decode(hexStr);
+    }
+    function parseSimple() {
+      pos += 7;
+      skipWhitespaceAndComments();
+      const valueStr = [];
+      while (pos < src.length && /\d/.test(src[pos])) {
+        valueStr.push(src[pos]);
+        pos++;
+      }
+      skipWhitespaceAndComments();
+      if (src[pos] !== ")") throw new Error("Expected ) after simple value");
+      pos++;
+      return { type: "simple", value: parseInt(valueStr.join(""), 10) };
+    }
+    function parseMap() {
+      pos++;
+      const result = /* @__PURE__ */ new Map();
+      while (true) {
+        skipWhitespaceAndComments();
+        if (pos >= src.length) throw new Error("Unterminated map");
+        if (src[pos] === "}") {
+          pos++;
+          break;
+        }
+        const key = parseValue();
+        skipWhitespaceAndComments();
+        if (src[pos] !== ":") throw new Error(`Expected ':' after map key at position ${pos}, got '${src[pos]}'`);
+        pos++;
+        const value = parseValue();
+        result.set(key, value);
+        skipWhitespaceAndComments();
+        if (src[pos] === ",") pos++;
+      }
+      return result;
+    }
+    function parseArray() {
+      pos++;
+      const result = [];
+      while (true) {
+        skipWhitespaceAndComments();
+        if (pos >= src.length) throw new Error("Unterminated array");
+        if (src[pos] === "]") {
+          pos++;
+          break;
+        }
+        result.push(parseValue());
+        skipWhitespaceAndComments();
+        if (src[pos] === ",") pos++;
+      }
+      return result;
+    }
+    return parseValue();
+  }
+
+  // src/browser.js
+  function formatClaims(claims) {
+    return EDN.formatClaims(claims);
   }
   return __toCommonJS(browser_exports);
 })();
