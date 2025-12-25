@@ -45,6 +45,14 @@ export const Alg = {
 };
 
 /**
+ * Default CBOR decode options.
+ * Uses preferMap: true to ensure CBOR maps decode as JavaScript Maps.
+ */
+const cborDecodeOptions = {
+  preferMap: true,
+};
+
+/**
  * Algorithm metadata
  */
 const AlgInfo = {
@@ -131,10 +139,15 @@ export async function sign(options) {
     ? cbor.encode(protectedHeader) 
     : new Uint8Array(0);
 
-  // Ensure payload is Uint8Array
-  const payloadBytes = payload instanceof Uint8Array 
-    ? payload 
-    : new Uint8Array(Buffer.from(payload));
+  // Ensure payload is Uint8Array (not Buffer, which cbor2 encodes differently)
+  let payloadBytes;
+  if (Buffer.isBuffer(payload)) {
+    payloadBytes = new Uint8Array(payload.buffer, payload.byteOffset, payload.length);
+  } else if (payload instanceof Uint8Array) {
+    payloadBytes = payload;
+  } else {
+    payloadBytes = new Uint8Array(Buffer.from(payload));
+  }
 
   // Create Sig_structure
   const sigStructure = createSigStructure(protectedBytes, payloadBytes, externalAad);
@@ -174,7 +187,7 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
   }
 
   // Decode COSE_Sign1
-  const decoded = cbor.decode(coseSign1);
+  const decoded = cbor.decode(coseSign1, cborDecodeOptions);
   
   // Handle tagged or untagged
   const structure = decoded instanceof cbor.Tag ? decoded.contents : decoded;
@@ -188,8 +201,8 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
   // Decode protected header to get algorithm
   let protectedHeader = new Map();
   if (protectedBytes && protectedBytes.length > 0) {
-    const decoded = cbor.decode(protectedBytes);
-    protectedHeader = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
+    const decodedProtected = cbor.decode(protectedBytes, cborDecodeOptions);
+    protectedHeader = decodedProtected instanceof Map ? decodedProtected : new Map(Object.entries(decodedProtected));
   }
 
   const alg = protectedHeader.get(HeaderParam.Algorithm);
@@ -226,7 +239,7 @@ export function decode(coseSign1) {
     throw new Error('COSE_Sign1 message is required');
   }
 
-  const decoded = cbor.decode(coseSign1);
+  const decoded = cbor.decode(coseSign1, cborDecodeOptions);
   const structure = decoded instanceof cbor.Tag ? decoded.contents : decoded;
   
   if (!Array.isArray(structure) || structure.length !== 4) {
@@ -238,7 +251,7 @@ export function decode(coseSign1) {
   // Decode protected header
   let protectedHeader = new Map();
   if (protectedBytes && protectedBytes.length > 0) {
-    const decodedHeader = cbor.decode(protectedBytes);
+    const decodedHeader = cbor.decode(protectedBytes, cborDecodeOptions);
     protectedHeader = decodedHeader instanceof Map 
       ? decodedHeader 
       : new Map(Object.entries(decodedHeader).map(([k, v]) => [Number(k), v]));

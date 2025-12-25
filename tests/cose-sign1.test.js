@@ -570,7 +570,14 @@ describe('COSE Sign1 Module', () => {
       assert.deepStrictEqual(Buffer.from(verified), payload);
       
       const { unprotectedHeaders } = getHeaders(signed);
-      assert.deepStrictEqual(unprotectedHeaders.get(-77777), nestedValue);
+      // With preferMap: true, CBOR maps decode as JavaScript Maps
+      const decoded = unprotectedHeaders.get(-77777);
+      assert.ok(decoded instanceof Map, 'Nested structure should be a Map');
+      assert.strictEqual(decoded.get('issuer'), 'test-issuer');
+      assert.deepStrictEqual(decoded.get('claims'), ['read', 'write']);
+      const metadata = decoded.get('metadata');
+      assert.ok(metadata instanceof Map);
+      assert.strictEqual(metadata.get('version'), 1);
     });
 
     it('should work with ES384 and custom headers', async () => {

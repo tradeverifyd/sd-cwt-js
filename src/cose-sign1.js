@@ -87,7 +87,7 @@ export async function sign(payload, signerKey, options = {}) {
       ? customProtectedHeaders.entries()
       : Object.entries(customProtectedHeaders);
     for (const [key, value] of entries) {
-      protectedMap.set(Number(key), value);
+      protectedMap.set(Number(key), convertBufferValues(value));
     }
   }
 
@@ -115,7 +115,7 @@ export async function sign(payload, signerKey, options = {}) {
       ? customUnprotectedHeaders.entries()
       : Object.entries(customUnprotectedHeaders);
     for (const [key, value] of entries) {
-      unprotectedMap.set(Number(key), value);
+      unprotectedMap.set(Number(key), convertBufferValues(value));
     }
   }
 
@@ -251,4 +251,32 @@ function toUint8Array(value) {
     return value;
   }
   return new Uint8Array(Buffer.from(value));
+}
+
+/**
+ * Recursively converts Buffer values to Uint8Array in a value
+ * (cbor2 encodes Buffer differently than Uint8Array)
+ */
+function convertBufferValues(value) {
+  if (Buffer.isBuffer(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.length);
+  }
+  if (Array.isArray(value)) {
+    return value.map(convertBufferValues);
+  }
+  if (value instanceof Map) {
+    const result = new Map();
+    for (const [k, v] of value) {
+      result.set(k, convertBufferValues(v));
+    }
+    return result;
+  }
+  if (value !== null && typeof value === 'object' && !(value instanceof Uint8Array)) {
+    const result = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = convertBufferValues(v);
+    }
+    return result;
+  }
+  return value;
 }
