@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SD-CWT Playground | Tradeverifyd</title>
+  <title>SD-CWT Sandbox | Tradeverifyd</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
       /* Tradeverifyd Dark Mode Color Palette */
-      --bg-primary: #050506;
+      --bg-primary: #0a0a0c;
       --bg-secondary: #1a1b1f;
       --bg-tertiary: #2D2E32;
       --bg-elevated: #3a3b40;
@@ -60,10 +60,10 @@
     /* Topographic Background Animation - Emergence Fade */
     @keyframes topoFade {
       0%, 100% {
-        opacity: 0.4;
+        opacity: 0.3;
       }
       50% {
-        opacity: 1;
+        opacity: 0.7;
       }
     }
 
@@ -81,7 +81,7 @@
       background-repeat: no-repeat;
       pointer-events: none;
       z-index: -1;
-      animation: topoFade 12s ease-in-out infinite;
+      animation: topoFade 15s ease-in-out infinite;
     }
 
     header {
@@ -972,7 +972,7 @@
         <!-- Tradeverifyd Full Logo -->
         <img src="tradeverifyd-logo.svg" alt="Tradeverifyd" class="logo-full">
         <div class="divider"></div>
-        <div class="product-name">SD-CWT <span>Playground</span></div>
+        <div class="product-name">SD-CWT <span>Sandbox</span></div>
       </div>
       <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank">spec</a> examples</p>
     </div>
@@ -2502,7 +2502,7 @@
     window.addEventListener('DOMContentLoaded', () => {
       // Auto-load spec keys and start at Issue step
       quickStart();
-      console.log('SD-CWT Playground ready with spec keys loaded.');
+      console.log('SD-CWT Sandbox ready with spec keys loaded.');
     });
   </script>
 </body>
