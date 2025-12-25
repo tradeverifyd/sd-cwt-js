@@ -1861,12 +1861,16 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     CoseKeyParam: () => CoseKeyParam,
     CoseKeyType: () => CoseKeyType,
     HeaderParam: () => HeaderParam,
+    computeCoseKeyThumbprint: () => computeCoseKeyThumbprint,
     coseKeyFromHex: () => coseKeyFromHex,
+    coseKeyThumbprint: () => coseKeyThumbprint,
+    coseKeyThumbprintUri: () => coseKeyThumbprintUri,
     coseKeyToHex: () => coseKeyToHex,
     coseKeyToInternal: () => coseKeyToInternal,
     deserializeCoseKey: () => deserializeCoseKey,
     generateKeyPair: () => generateKeyPair2,
     getAlgorithmFromCoseKey: () => getAlgorithmFromCoseKey,
+    getCrypto: () => getCrypto,
     getHeaders: () => getHeaders,
     internalToCoseKey: () => internalToCoseKey,
     isCoseKey: () => isCoseKey,
@@ -2468,6 +2472,9 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
       }
     };
   }
+  function getCrypto() {
+    return crypto_browser_default;
+  }
 
   // src/cose-sign1.js
   var Algorithm = {
@@ -2598,6 +2605,54 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
       bytes[i3] = parseInt(clean.substr(i3 * 2, 2), 16);
     }
     return deserializeCoseKey(bytes);
+  }
+  function computeCoseKeyThumbprint(coseKey, hashAlgorithm = "SHA-256") {
+    let kty, crv, x4, y6;
+    if (coseKey instanceof Map) {
+      kty = coseKey.get(CoseKeyParam.Kty);
+      crv = coseKey.get(CoseKeyParam.Crv);
+      x4 = coseKey.get(CoseKeyParam.X);
+      y6 = coseKey.get(CoseKeyParam.Y);
+    } else if (typeof coseKey === "object") {
+      kty = coseKey[CoseKeyParam.Kty] || coseKey["1"];
+      crv = coseKey[CoseKeyParam.Crv] || coseKey["-1"];
+      x4 = coseKey[CoseKeyParam.X] || coseKey["-2"];
+      y6 = coseKey[CoseKeyParam.Y] || coseKey["-3"];
+    } else {
+      throw new Error("COSE Key must be a Map or Object");
+    }
+    if (kty !== CoseKeyType.EC2) {
+      throw new Error(`Unsupported key type for thumbprint: ${kty}. Only EC2 (2) is supported.`);
+    }
+    if (crv === void 0 || !x4 || !y6) {
+      throw new Error("COSE Key must have crv, x, and y parameters for thumbprint");
+    }
+    const thumbprintParams = /* @__PURE__ */ new Map();
+    thumbprintParams.set(CoseKeyParam.Kty, kty);
+    thumbprintParams.set(CoseKeyParam.Crv, crv);
+    thumbprintParams.set(CoseKeyParam.X, toUint8Array(x4));
+    thumbprintParams.set(CoseKeyParam.Y, toUint8Array(y6));
+    const encoded = Q(thumbprintParams);
+    const crypto = getCrypto();
+    const hash = crypto.createHash(hashAlgorithm.toLowerCase().replace("-", ""));
+    hash.update(new Uint8Array(encoded));
+    const digest = hash.digest();
+    return new Uint8Array(digest);
+  }
+  function coseKeyThumbprint(coseKey, hashAlgorithm = "SHA-256") {
+    const bytes = computeCoseKeyThumbprint(coseKey, hashAlgorithm);
+    return Array.from(bytes).map((b4) => b4.toString(16).padStart(2, "0")).join("");
+  }
+  function coseKeyThumbprintUri(coseKey, hashAlgorithm = "SHA-256") {
+    const bytes = computeCoseKeyThumbprint(coseKey, hashAlgorithm);
+    let binary = "";
+    for (let i3 = 0; i3 < bytes.length; i3++) {
+      binary += String.fromCharCode(bytes[i3]);
+    }
+    const base64 = btoa(binary);
+    const base64url = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const hashName = hashAlgorithm.toLowerCase();
+    return `urn:ietf:params:oauth:ckt:${hashName}:${base64url}`;
   }
   function normalizeKey(key) {
     if (isCoseKey(key)) {

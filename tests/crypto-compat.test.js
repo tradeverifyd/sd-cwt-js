@@ -404,3 +404,107 @@ describe('COSE Key Serialization', () => {
     );
   });
 });
+
+describe('COSE Key Thumbprint (RFC 9679)', () => {
+  
+  test('computeCoseKeyThumbprint returns 32 bytes for SHA-256', () => {
+    const keyPair = coseSign1.generateKeyPair('ES256');
+    
+    const thumbprint = coseSign1.computeCoseKeyThumbprint(keyPair.publicKey);
+    
+    assert.ok(thumbprint instanceof Uint8Array, 'Should return Uint8Array');
+    assert.strictEqual(thumbprint.length, 32, 'SHA-256 should produce 32 bytes');
+  });
+
+  test('coseKeyThumbprint returns hex string', () => {
+    const keyPair = coseSign1.generateKeyPair('ES256');
+    
+    const thumbprintHex = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    
+    assert.strictEqual(typeof thumbprintHex, 'string', 'Should return string');
+    assert.strictEqual(thumbprintHex.length, 64, 'SHA-256 hex should be 64 chars');
+    assert.match(thumbprintHex, /^[a-f0-9]+$/, 'Should be lowercase hex');
+  });
+
+  test('thumbprint is same for private and public key with same coordinates', () => {
+    const keyPair = coseSign1.generateKeyPair('ES256');
+    
+    const privateThumbprint = coseSign1.coseKeyThumbprint(keyPair.privateKey);
+    const publicThumbprint = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    
+    // Thumbprints should be identical since they only use public components
+    assert.strictEqual(privateThumbprint, publicThumbprint, 
+      'Private and public key should have same thumbprint');
+  });
+
+  test('different keys have different thumbprints', () => {
+    const keyPair1 = coseSign1.generateKeyPair('ES256');
+    const keyPair2 = coseSign1.generateKeyPair('ES256');
+    
+    const thumbprint1 = coseSign1.coseKeyThumbprint(keyPair1.publicKey);
+    const thumbprint2 = coseSign1.coseKeyThumbprint(keyPair2.publicKey);
+    
+    assert.notStrictEqual(thumbprint1, thumbprint2, 
+      'Different keys should have different thumbprints');
+  });
+
+  test('coseKeyThumbprintUri returns correct format', () => {
+    const keyPair = coseSign1.generateKeyPair('ES256');
+    
+    const uri = coseSign1.coseKeyThumbprintUri(keyPair.publicKey);
+    
+    assert.ok(uri.startsWith('urn:ietf:params:oauth:ckt:sha-256:'), 
+      `URI should start with correct prefix, got: ${uri}`);
+    
+    // Should have base64url encoded thumbprint after the prefix
+    // Format: urn:ietf:params:oauth:ckt:sha-256:<base64url>
+    const parts = uri.split(':');
+    assert.strictEqual(parts.length, 7, 'URI should have 7 colon-separated parts');
+    assert.strictEqual(parts[5], 'sha-256', 'Hash algorithm should be sha-256');
+    
+    // Base64url part should only contain allowed characters
+    const base64url = parts[6];
+    assert.match(base64url, /^[A-Za-z0-9_-]+$/, 'Should be valid base64url');
+  });
+
+  test('thumbprint is deterministic', () => {
+    const keyPair = coseSign1.generateKeyPair('ES256');
+    
+    // Compute thumbprint multiple times
+    const t1 = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    const t2 = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    const t3 = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    
+    assert.strictEqual(t1, t2, 'Thumbprint should be consistent');
+    assert.strictEqual(t2, t3, 'Thumbprint should be consistent');
+  });
+
+  test('thumbprint works with ES384 keys', () => {
+    const keyPair = coseSign1.generateKeyPair('ES384');
+    
+    const thumbprint = coseSign1.coseKeyThumbprint(keyPair.publicKey);
+    
+    assert.strictEqual(thumbprint.length, 64, 'SHA-256 hex should be 64 chars');
+  });
+
+  test('computeCoseKeyThumbprint throws on unsupported key type', () => {
+    const invalidKey = new Map();
+    invalidKey.set(coseSign1.CoseKeyParam.Kty, 99); // Invalid key type
+    
+    assert.throws(
+      () => coseSign1.computeCoseKeyThumbprint(invalidKey),
+      /Unsupported key type/
+    );
+  });
+
+  test('computeCoseKeyThumbprint throws on missing parameters', () => {
+    const incompleteKey = new Map();
+    incompleteKey.set(coseSign1.CoseKeyParam.Kty, coseSign1.CoseKeyType.EC2);
+    // Missing crv, x, y
+    
+    assert.throws(
+      () => coseSign1.computeCoseKeyThumbprint(incompleteKey),
+      /must have crv, x, and y/
+    );
+  });
+});

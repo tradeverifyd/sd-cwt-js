@@ -385,3 +385,11 @@ export function generateKeyPair(alg = Alg.ES256) {
   };
 }
 
+/**
+ * Get the crypto module (Node.js crypto or browser shim)
+ * @returns {Object} The crypto module
+ */
+export function getCrypto() {
+  return crypto;
+}
+

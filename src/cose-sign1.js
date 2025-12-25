@@ -9,7 +9,7 @@ import * as sign1 from './cose/sign1.js';
 import * as cbor from 'cbor2';
 
 // Re-export core types and constants
-export { HeaderParam, Alg, COSE_Sign1_Tag } from './cose/sign1.js';
+export { HeaderParam, Alg, COSE_Sign1_Tag, getCrypto } from './cose/sign1.js';
 
 /**
  * COSE Sign1 algorithms supported (string aliases)
@@ -208,6 +208,110 @@ export function coseKeyFromHex(hex) {
     bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
   }
   return deserializeCoseKey(bytes);
+}
+
+/**
+ * Compute COSE Key Thumbprint per RFC 9679
+ * 
+ * The thumbprint is computed by:
+ * 1. Extracting only the required public key parameters
+ * 2. Encoding them in deterministic CBOR (sorted by integer key)
+ * 3. Hashing with the specified algorithm (default SHA-256)
+ * 
+ * For EC2 keys (kty=2), required parameters are: kty, crv, x, y
+ * 
+ * @param {Map|Object} coseKey - COSE Key (public or private)
+ * @param {string} [hashAlgorithm='SHA-256'] - Hash algorithm ('SHA-256', 'SHA-384', 'SHA-512')
+ * @returns {Uint8Array} The thumbprint bytes
+ */
+export function computeCoseKeyThumbprint(coseKey, hashAlgorithm = 'SHA-256') {
+  // Extract key parameters
+  let kty, crv, x, y;
+  
+  if (coseKey instanceof Map) {
+    kty = coseKey.get(CoseKeyParam.Kty);
+    crv = coseKey.get(CoseKeyParam.Crv);
+    x = coseKey.get(CoseKeyParam.X);
+    y = coseKey.get(CoseKeyParam.Y);
+  } else if (typeof coseKey === 'object') {
+    kty = coseKey[CoseKeyParam.Kty] || coseKey['1'];
+    crv = coseKey[CoseKeyParam.Crv] || coseKey['-1'];
+    x = coseKey[CoseKeyParam.X] || coseKey['-2'];
+    y = coseKey[CoseKeyParam.Y] || coseKey['-3'];
+  } else {
+    throw new Error('COSE Key must be a Map or Object');
+  }
+  
+  // Validate required parameters for EC2 keys
+  if (kty !== CoseKeyType.EC2) {
+    throw new Error(`Unsupported key type for thumbprint: ${kty}. Only EC2 (2) is supported.`);
+  }
+  
+  if (crv === undefined || !x || !y) {
+    throw new Error('COSE Key must have crv, x, and y parameters for thumbprint');
+  }
+  
+  // Build the thumbprint input Map with only required public key parameters
+  // RFC 9679: Parameters must be in deterministic order
+  // For EC2: kty (1), crv (-1), x (-2), y (-3)
+  // CBOR deterministic encoding sorts integer keys by:
+  // 1. Positive integers before negative integers
+  // 2. Within each group, by absolute value
+  // So the order is: 1, -1, -2, -3
+  
+  // Use an array of [key, value] pairs in the correct order for deterministic encoding
+  const thumbprintParams = new Map();
+  thumbprintParams.set(CoseKeyParam.Kty, kty);        // 1
+  thumbprintParams.set(CoseKeyParam.Crv, crv);        // -1
+  thumbprintParams.set(CoseKeyParam.X, toUint8Array(x)); // -2
+  thumbprintParams.set(CoseKeyParam.Y, toUint8Array(y)); // -3
+  
+  // Encode with deterministic/canonical CBOR
+  // cbor2 uses canonical encoding by default when encoding Maps
+  const encoded = cbor.encode(thumbprintParams);
+  
+  // Hash the encoded bytes
+  const crypto = sign1.getCrypto();
+  const hash = crypto.createHash(hashAlgorithm.toLowerCase().replace('-', ''));
+  hash.update(new Uint8Array(encoded));
+  const digest = hash.digest();
+  
+  return new Uint8Array(digest);
+}
+
+/**
+ * Compute COSE Key Thumbprint and return as hex string
+ * @param {Map|Object} coseKey - COSE Key (public or private)
+ * @param {string} [hashAlgorithm='SHA-256'] - Hash algorithm
+ * @returns {string} Hex-encoded thumbprint
+ */
+export function coseKeyThumbprint(coseKey, hashAlgorithm = 'SHA-256') {
+  const bytes = computeCoseKeyThumbprint(coseKey, hashAlgorithm);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Compute COSE Key Thumbprint URI per RFC 9679
+ * Format: urn:ietf:params:oauth:ckt:<hash-name>:<base64url-thumbprint>
+ * @param {Map|Object} coseKey - COSE Key (public or private)
+ * @param {string} [hashAlgorithm='SHA-256'] - Hash algorithm
+ * @returns {string} CKT URI
+ */
+export function coseKeyThumbprintUri(coseKey, hashAlgorithm = 'SHA-256') {
+  const bytes = computeCoseKeyThumbprint(coseKey, hashAlgorithm);
+  
+  // Convert to base64url
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+  const base64url = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  
+  // Hash name for URI (lowercase, no hyphen for SHA-256 -> sha-256)
+  const hashName = hashAlgorithm.toLowerCase();
+  
+  return `urn:ietf:params:oauth:ckt:${hashName}:${base64url}`;
 }
 
 /**

@@ -528,8 +528,12 @@
           </div>
 
           <div class="form-group">
-            <label>Claims (JSON with toBeRedacted markers)</label>
-            <textarea id="issuerClaims" class="tall" placeholder='{ "name": { "toBeRedacted": true, "value": "Alice" }, "age": 30 }'></textarea>
+            <label>Claims to be Issued (EDN)</label>
+            <textarea id="issuerClaimsEdn" class="tall" placeholder='{
+  1: "https://issuer.example",
+  2: "https://device.example",
+  58("ABCD-123456")
+}'></textarea>
           </div>
 
           <div class="form-group">
@@ -631,13 +635,8 @@
           <button class="primary" onclick="verifyPresentation()">Verify</button>
 
           <div class="output-section" id="verifierOutput" style="display: none;">
-            <div class="tabs">
-              <div class="tab active" onclick="switchTab('claims')">Verified Claims</div>
-              <div class="tab" onclick="switchTab('raw')">Raw EDN</div>
-            </div>
-            <div class="tab-content">
-              <div class="edn-output" id="verifiedClaimsEdn"></div>
-            </div>
+            <div class="output-label">Verified Claims (EDN)</div>
+            <div class="edn-output" id="verifiedClaimsEdn"></div>
             <div id="verifierStatus"></div>
           </div>
         </div>
@@ -712,29 +711,28 @@
     let holderAlgorithm = 'ES256';  // Spec uses ES256 for holder
     let issuedToken = null;
     let disclosures = [];
-    let currentTabView = 'claims';
 
     // ==========================================================================
     // Initialize with Spec Example Data (Section 13.1)
     // ==========================================================================
     
-    // Claims from Section 13.1 example (converted to JSON format)
-    const SPEC_CLAIMS = {
-      "/ iss / 1": "https://issuer.example",
-      "/ sub / 2": "https://device.example",
-      "/ exp / 4": 1725330600,
-      "/ nbf / 5": 1725243900,
-      "/ iat / 6": 1725244200,
-      "/ most_recent_inspection_passed / 500": true,
-      "/ inspector_license_number / 501": { "toBeRedacted": true, "value": "ABCD-123456" },
-      "/ inspection_location / 503": {
-        "country": "us",
-        "region": { "toBeRedacted": true, "value": "ca" },
-        "postal_code": { "toBeRedacted": true, "value": "94188" }
-      }
-    };
+    // Claims from Section 13.1 example in EDN format
+    const SPEC_CLAIMS_EDN = `{
+  / iss / 1: "https://issuer.example",
+  / sub / 2: "https://device.example",
+  / exp / 4: 1725330600,
+  / nbf / 5: 1725243900,
+  / iat / 6: 1725244200,
+  / most_recent_inspection_passed / 500: true,
+  / inspector_license_number / 501: 58("ABCD-123456"),
+  / inspection_location / 503: {
+    "country": "us",
+    "region": 58("ca"),
+    "postal_code": 58("94188")
+  }
+}`;
 
-    document.getElementById('issuerClaims').value = JSON.stringify(SPEC_CLAIMS, null, 2);
+    document.getElementById('issuerClaimsEdn').value = SPEC_CLAIMS_EDN;
     document.getElementById('holderAudience').value = 'https://verifier.example';
     document.getElementById('verifierAudience').value = 'https://verifier.example';
 
@@ -751,10 +749,7 @@
         };
         issuerAlgorithm = 'ES384';
         
-        const publicKeyHex = SDCWT.coseKeyToHex(issuerKeyPair.publicKey);
-        document.getElementById('issuerKeyDisplay').value = 
-          `Spec ES384: ${publicKeyHex.slice(0, 24)}...`;
-        document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'Spec ES384');
         showStatus('issuerStatus', 'Loaded Spec Issuer Key (ES384/P-384)', 'success');
       } catch (error) {
         showStatus('issuerStatus', 'Failed to load spec key: ' + error.message, 'error');
@@ -770,10 +765,7 @@
         };
         holderAlgorithm = 'ES256';
         
-        const publicKeyHex = SDCWT.coseKeyToHex(holderKeyPair.publicKey);
-        document.getElementById('holderKeyDisplay').value = 
-          `Spec ES256: ${publicKeyHex.slice(0, 24)}...`;
-        document.getElementById('holderPublicKeyForIssuer').value = publicKeyHex;
+        updateKeyDisplay('holder', holderKeyPair.publicKey, 'Spec ES256');
         showStatus('holderStatus', 'Loaded Spec Holder Key (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('holderStatus', 'Failed to load spec key: ' + error.message, 'error');
@@ -790,10 +782,7 @@
         };
         issuerAlgorithm = 'ES256';
         
-        const publicKeyHex = SDCWT.coseKeyToHex(issuerKeyPair.publicKey);
-        document.getElementById('issuerKeyDisplay').value = 
-          `New ES256: ${publicKeyHex.slice(0, 24)}...`;
-        document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'New ES256');
         showStatus('issuerStatus', 'New Issuer Key generated (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('issuerStatus', 'Key generation failed: ' + error.message, 'error');
@@ -810,13 +799,27 @@
         };
         holderAlgorithm = 'ES256';
         
-        const publicKeyHex = SDCWT.coseKeyToHex(holderKeyPair.publicKey);
-        document.getElementById('holderKeyDisplay').value = 
-          `New ES256: ${publicKeyHex.slice(0, 24)}...`;
-        document.getElementById('holderPublicKeyForIssuer').value = publicKeyHex;
+        updateKeyDisplay('holder', holderKeyPair.publicKey, 'New ES256');
         showStatus('holderStatus', 'New Holder Key generated (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('holderStatus', 'Key generation failed: ' + error.message, 'error');
+      }
+    }
+
+    // Update key display with thumbprint
+    function updateKeyDisplay(role, publicKey, label) {
+      const publicKeyHex = SDCWT.coseSign1.coseKeyToHex(publicKey);
+      const thumbprint = SDCWT.coseSign1.coseKeyThumbprint(publicKey);
+      const thumbprintShort = thumbprint.slice(0, 16) + '...';
+      
+      if (role === 'issuer') {
+        document.getElementById('issuerKeyDisplay').value = 
+          `${label} | CKT: ${thumbprintShort}`;
+        document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+      } else {
+        document.getElementById('holderKeyDisplay').value = 
+          `${label} | CKT: ${thumbprintShort}`;
+        document.getElementById('holderPublicKeyForIssuer').value = publicKeyHex;
       }
     }
 
@@ -875,7 +878,225 @@
     // Claims Transformation
     // ==========================================================================
     
-    function transformClaimsForIssue(claims, holderPublicKeyCoseMap) {
+    // ==========================================================================
+    // EDN Parser - Parse EDN notation into CBOR-compatible structures
+    // ==========================================================================
+    
+    function parseEdn(ednString) {
+      // Simple EDN parser for our subset of EDN
+      let pos = 0;
+      const src = ednString;
+      
+      function skipWhitespace() {
+        while (pos < src.length) {
+          const ch = src[pos];
+          if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+            pos++;
+          } else {
+            break;
+          }
+        }
+      }
+      
+      function skipComment() {
+        // Skip comments like "/ name /" - must end with " /"
+        if (pos < src.length && src[pos] === '/') {
+          pos++; // skip initial /
+          // Find the closing " /"
+          while (pos < src.length) {
+            if (src[pos] === '/' && pos > 0 && src[pos - 1] === ' ') {
+              pos++; // skip closing /
+              break;
+            }
+            pos++;
+          }
+          return true;
+        }
+        return false;
+      }
+      
+      function skipWhitespaceAndComments() {
+        while (pos < src.length) {
+          skipWhitespace();
+          if (pos < src.length && src[pos] === '/') {
+            skipComment();
+          } else {
+            break;
+          }
+        }
+      }
+      
+      function parseValue() {
+        skipWhitespaceAndComments();
+        if (pos >= src.length) throw new Error('Unexpected end of input');
+        
+        const ch = src[pos];
+        
+        // String
+        if (ch === '"') {
+          return parseString();
+        }
+        
+        // Map
+        if (ch === '{') {
+          return parseMap();
+        }
+        
+        // Array
+        if (ch === '[') {
+          return parseArray();
+        }
+        
+        // Tag (e.g., 58("value"))
+        if (/\d/.test(ch)) {
+          return parseNumberOrTag();
+        }
+        
+        // Boolean or keyword
+        if (/[a-z]/.test(ch)) {
+          return parseKeyword();
+        }
+        
+        // Negative number
+        if (ch === '-') {
+          return parseNumber();
+        }
+        
+        // h'...' hex bytes
+        if (ch === 'h' && src[pos + 1] === "'") {
+          return parseHexBytes();
+        }
+        
+        throw new Error(`Unexpected character '${ch}' at position ${pos}`);
+      }
+      
+      function parseString() {
+        pos++; // skip opening quote
+        let result = '';
+        while (pos < src.length && src[pos] !== '"') {
+          if (src[pos] === '\\') {
+            pos++;
+            if (pos >= src.length) throw new Error('Unterminated string');
+            const escape = src[pos];
+            if (escape === 'n') result += '\n';
+            else if (escape === 't') result += '\t';
+            else if (escape === 'r') result += '\r';
+            else if (escape === '"') result += '"';
+            else if (escape === '\\') result += '\\';
+            else result += escape;
+          } else {
+            result += src[pos];
+          }
+          pos++;
+        }
+        if (pos >= src.length) throw new Error('Unterminated string');
+        pos++; // skip closing quote
+        return result;
+      }
+      
+      function parseNumber() {
+        const start = pos;
+        if (src[pos] === '-') pos++;
+        while (pos < src.length && /[\d.]/.test(src[pos])) pos++;
+        const numStr = src.slice(start, pos);
+        return numStr.includes('.') ? parseFloat(numStr) : parseInt(numStr, 10);
+      }
+      
+      function parseNumberOrTag() {
+        const start = pos;
+        while (pos < src.length && /\d/.test(src[pos])) pos++;
+        const numStr = src.slice(start, pos);
+        
+        skipWhitespaceAndComments();
+        
+        // Check if this is a tag (number followed by parenthesis)
+        if (pos < src.length && src[pos] === '(') {
+          pos++; // skip (
+          const tagNumber = parseInt(numStr, 10);
+          const content = parseValue();
+          skipWhitespaceAndComments();
+          if (src[pos] !== ')') throw new Error('Expected ) after tag content');
+          pos++; // skip )
+          return new SDCWT.cbor.Tag(tagNumber, content);
+        }
+        
+        // Just a number
+        return parseInt(numStr, 10);
+      }
+      
+      function parseKeyword() {
+        const start = pos;
+        while (pos < src.length && /[a-z_]/.test(src[pos])) pos++;
+        const keyword = src.slice(start, pos);
+        if (keyword === 'true') return true;
+        if (keyword === 'false') return false;
+        if (keyword === 'null') return null;
+        throw new Error(`Unknown keyword: ${keyword}`);
+      }
+      
+      function parseHexBytes() {
+        pos += 2; // skip h'
+        const start = pos;
+        while (pos < src.length && src[pos] !== "'") pos++;
+        const hexStr = src.slice(start, pos);
+        pos++; // skip closing '
+        return hexToBytes(hexStr);
+      }
+      
+      function parseMap() {
+        pos++; // skip {
+        const result = new Map();
+        
+        while (true) {
+          skipWhitespaceAndComments();
+          if (pos >= src.length) throw new Error('Unterminated map');
+          if (src[pos] === '}') {
+            pos++;
+            break;
+          }
+          
+          const key = parseValue();
+          
+          skipWhitespaceAndComments();
+          if (src[pos] !== ':') throw new Error(`Expected ':' after map key, got '${src[pos]}'`);
+          pos++; // skip :
+          
+          const value = parseValue();
+          result.set(key, value);
+          
+          skipWhitespaceAndComments();
+          if (src[pos] === ',') pos++;
+        }
+        
+        return result;
+      }
+      
+      function parseArray() {
+        pos++; // skip [
+        const result = [];
+        
+        while (true) {
+          skipWhitespaceAndComments();
+          if (pos >= src.length) throw new Error('Unterminated array');
+          if (src[pos] === ']') {
+            pos++;
+            break;
+          }
+          
+          result.push(parseValue());
+          
+          skipWhitespaceAndComments();
+          if (src[pos] === ',') pos++;
+        }
+        
+        return result;
+      }
+      
+      return parseValue();
+    }
+
+    function transformClaimsForIssue(parsedClaims, holderPublicKeyCoseMap) {
+      // parsedClaims is already a Map from parseEdn
       const result = new Map();
       
       // Add confirmation claim with holder's public key (COSE Key Map)
@@ -890,37 +1111,21 @@
       cnf.set(1, publicOnlyCoseKey); // COSE_Key
       result.set(8, cnf);  // cnf claim
 
-      // Process user claims - parse special comment format like "/ iss / 1"
-      for (const [key, value] of Object.entries(claims)) {
-        const claimKey = parseClaimKey(key);
-        result.set(claimKey, transformValue(value));
+      // Copy all claims from parsed EDN (already has proper keys and Tag objects)
+      if (parsedClaims instanceof Map) {
+        for (const [key, value] of parsedClaims) {
+          result.set(key, value);
+        }
       }
 
       return result;
     }
 
-    function parseClaimKey(key) {
-      // Handle spec format like "/ iss / 1" or "/ most_recent_inspection_passed / 500"
-      const match = key.match(/\/\s*\w+\s*\/\s*(\d+)/);
-      if (match) {
-        return parseInt(match[1]);
-      }
-      // Try to parse as number
-      if (!isNaN(key)) {
-        return parseInt(key);
-      }
-      // Return as string
-      return key;
-    }
-
     function transformValue(value) {
+      // This is kept for backwards compatibility but no longer needed
+      // since parseEdn already creates proper CBOR Tag objects
       if (value === null || value === undefined) {
         return value;
-      }
-
-      if (typeof value === 'object' && value.toBeRedacted === true) {
-        // Wrap in ToBeRedacted tag (58)
-        return new SDCWT.cbor.Tag(58, value.value);
       }
 
       if (Array.isArray(value)) {
@@ -952,12 +1157,12 @@
           throw new Error('Please provide holder public key (load or generate holder key first)');
         }
 
-        const claimsJson = document.getElementById('issuerClaims').value;
-        const userClaims = JSON.parse(claimsJson);
+        const claimsEdn = document.getElementById('issuerClaimsEdn').value;
+        const parsedClaims = parseEdn(claimsEdn);
         
         // Parse the holder public key from hex-encoded COSE Key
         const holderPublicKey = SDCWT.coseKeyFromHex(holderPubHex);
-        const claims = transformClaimsForIssue(userClaims, holderPublicKey);
+        const claims = transformClaimsForIssue(parsedClaims, holderPublicKey);
 
         // Issue the SD-CWT using the issuer's algorithm
         const result = await SDCWT.Issuer.issue({
@@ -1148,12 +1353,6 @@
         .replace(/(h'[0-9a-fA-F]+')/g, '<span class="tag">$1</span>');
     }
 
-    // Tab switching
-    function switchTab(tab) {
-      currentTabView = tab;
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      event.target.classList.add('active');
-    }
 
     // Utility functions
     function showStatus(elementId, message, type) {
