@@ -66,6 +66,23 @@ function getClaimComment(key) {
 }
 
 /**
+ * Check if a key is a Tag 58 (to be redacted) and format with comment
+ * @param {any} key - The map key
+ * @returns {{ isRedacted: boolean, comment: string }} 
+ */
+function getRedactionComment(key) {
+  if (key instanceof cbor.Tag && key.tag === 58) {
+    // For numbered keys, include a hint about the claim name if known
+    if (typeof key.contents === 'number') {
+      return { isRedacted: true, comment: '/ to be redacted / ' };
+    }
+    // For string keys, just say "to be redacted"
+    return { isRedacted: true, comment: '/ to be redacted / ' };
+  }
+  return { isRedacted: false, comment: '' };
+}
+
+/**
  * EDN formatting utilities
  */
 export const EDN = {
@@ -202,8 +219,17 @@ function formatMapWithComments(map, depth, addComments = false) {
   const entries = [];
   
   for (const [key, value] of map) {
-    // Only add comments at the top level (when addComments is true)
-    const comment = (addComments && typeof key === 'number') ? getClaimComment(key) : '';
+    let comment = '';
+    
+    // Check for redaction tag first (works at any level)
+    const redaction = getRedactionComment(key);
+    if (redaction.isRedacted) {
+      comment = redaction.comment;
+    } else if (addComments && typeof key === 'number') {
+      // Only add CWT claim comments at the top level
+      comment = getClaimComment(key);
+    }
+    
     const keyStr = formatValueWithComments(key, depth + 1);
     const valStr = formatValueWithComments(value, depth + 1);
     entries.push(`${pad1}${comment}${keyStr}: ${valStr}`);

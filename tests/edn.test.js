@@ -263,6 +263,41 @@ describe('EDN.parse', () => {
       assert.strictEqual(result.get(1), 'issuer');
       assert.strictEqual(result.get(2), 'subject');
     });
+
+    it('should parse map with "to be redacted" comments', () => {
+      const result = EDN.parse('{ / to be redacted / 58("field"): "value", / to be redacted: name / 58(100): "secret" }');
+      assert.ok(result instanceof Map);
+      // Find the tagged keys
+      let foundField = false;
+      let found100 = false;
+      for (const [key, value] of result) {
+        if (key instanceof cbor.Tag && key.tag === 58) {
+          if (key.contents === 'field') {
+            assert.strictEqual(value, 'value');
+            foundField = true;
+          }
+          if (key.contents === 100) {
+            assert.strictEqual(value, 'secret');
+            found100 = true;
+          }
+        }
+      }
+      assert.ok(foundField, 'Should have found tagged key 58("field")');
+      assert.ok(found100, 'Should have found tagged key 58(100)');
+    });
+
+    it('should parse complex comments with colons', () => {
+      const result = EDN.parse('{ / to be redacted: serial_number / 58(501): "ABCD-123456" }');
+      assert.ok(result instanceof Map);
+      let found = false;
+      for (const [key, value] of result) {
+        if (key instanceof cbor.Tag && key.tag === 58 && key.contents === 501) {
+          assert.strictEqual(value, 'ABCD-123456');
+          found = true;
+        }
+      }
+      assert.ok(found, 'Should have found tagged key');
+    });
   });
 
   describe('arrays', () => {
@@ -431,6 +466,31 @@ describe('EDN.formatClaims', () => {
       }
     }
     assert.ok(!innerHasComment, 'Nested map should not have CWT claim comments');
+  });
+
+  it('should add "to be redacted" comments for Tag 58 keys', () => {
+    const claims = new Map([
+      [1, 'https://issuer.example'],
+      [new cbor.Tag(58, 501), 'secret-value'],
+    ]);
+    const result = EDN.formatClaims(claims);
+    assert.ok(result.includes('/ iss /'), 'Should have iss comment');
+    assert.ok(result.includes('/ to be redacted /'), 'Should have redaction comment');
+    assert.ok(result.includes('58(501)'), 'Should have the tagged key');
+  });
+
+  it('should add "to be redacted" comments for nested Tag 58 keys', () => {
+    const inner = new Map([
+      ['country', 'us'],
+      [new cbor.Tag(58, 'region'), 'ca'],
+    ]);
+    const claims = new Map([
+      [1, 'https://issuer.example'],
+      [503, inner],
+    ]);
+    const result = EDN.formatClaims(claims);
+    assert.ok(result.includes('/ to be redacted /'), 'Should have redaction comment for nested key');
+    assert.ok(result.includes('58("region")'), 'Should have the tagged key');
   });
 });
 

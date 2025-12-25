@@ -1051,13 +1051,20 @@
   / exp / 4: 1725330600,
   / nbf / 5: 1725243900,
   / iat / 6: 1725244200,
-  / cnf / 8: {1: {1: 2, -1: 1, -2: h'8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d', -3: h'4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'}},
+  / cnf / 8: {
+    / COSE_Key / 1: {
+      / kty: EC2 / 1: 2,
+      / crv: P-256 / -1: 1,
+      / x / -2: h'8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d',
+      / y / -3: h'4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'
+    }
+  },
   / most_recent_inspection_passed / 500: true,
-  58(501): "ABCD-123456",
+  / to be redacted: serial_number / 58(501): "ABCD-123456",
   / inspection_location / 503: {
     "country": "us",
-    58("region"): "ca",
-    58("postal_code"): "94188"
+    / to be redacted / 58("region"): "ca",
+    / to be redacted / 58("postal_code"): "94188"
   }
 }`;
 
@@ -1163,7 +1170,17 @@
       const xHex = SDCWT.Hex.encode(x);
       const yHex = SDCWT.Hex.encode(y);
       
-      return `/ cnf / 8: {1: {1: ${kty}, -1: ${crv}, -2: h'${xHex}', -3: h'${yHex}'}}`;
+      // Get curve name for comment
+      const crvName = crv === 1 ? 'P-256' : crv === 2 ? 'P-384' : `curve ${crv}`;
+      
+      return `/ cnf / 8: {
+    / COSE_Key / 1: {
+      / kty: EC2 / 1: ${kty},
+      / crv: ${crvName} / -1: ${crv},
+      / x / -2: h'${xHex}',
+      / y / -3: h'${yHex}'
+    }
+  }`;
     }
     
     // Update the cnf claim in the EDN textarea when holder key changes
@@ -1171,15 +1188,21 @@
       const textarea = document.getElementById('issuerClaimsEdn');
       let edn = textarea.value;
       
-      const newCnfLine = generateCnfClaimEdn(publicKey);
+      const newCnfBlock = generateCnfClaimEdn(publicKey);
       
-      // Match cnf claim line: / cnf / 8: {...} or just 8: {...}
-      // This regex matches the entire cnf claim line including nested braces
-      const cnfRegex = /(\/\s*cnf\s*\/\s*)?8\s*:\s*\{1\s*:\s*\{[^}]+\}\s*\}/;
+      // Match the entire cnf claim block (multi-line format)
+      // Matches: / cnf / 8: { ... } with nested braces
+      const cnfRegex = /\/\s*cnf\s*\/\s*8\s*:\s*\{[\s\S]*?\/\s*COSE_Key\s*\/\s*1\s*:\s*\{[\s\S]*?\}\s*\}/;
+      
+      // Also try single-line format for backwards compatibility
+      const cnfRegexSingleLine = /(\/\s*cnf\s*\/\s*)?8\s*:\s*\{1\s*:\s*\{[^}]+\}\s*\}/;
       
       if (cnfRegex.test(edn)) {
-        // Replace existing cnf claim
-        edn = edn.replace(cnfRegex, newCnfLine);
+        // Replace existing multi-line cnf claim
+        edn = edn.replace(cnfRegex, newCnfBlock);
+      } else if (cnfRegexSingleLine.test(edn)) {
+        // Replace existing single-line cnf claim
+        edn = edn.replace(cnfRegexSingleLine, newCnfBlock);
       } else {
         // Insert cnf claim after the opening brace
         // Find the first line after { and insert before it
@@ -1187,14 +1210,14 @@
         let inserted = false;
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].trim() === '{') {
-            lines.splice(i + 1, 0, '  ' + newCnfLine + ',');
+            lines.splice(i + 1, 0, '  ' + newCnfBlock + ',');
             inserted = true;
             break;
           }
         }
         if (!inserted) {
           // Fallback: just add to beginning inside the object
-          edn = edn.replace('{', '{\n  ' + newCnfLine + ',');
+          edn = edn.replace('{', '{\n  ' + newCnfBlock + ',');
         } else {
           edn = lines.join('\n');
         }
