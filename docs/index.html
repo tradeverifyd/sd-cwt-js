@@ -525,6 +525,51 @@
       color: var(--accent-orange);
     }
 
+    .edn-display {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      color: var(--text-primary);
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .edn-display .edn-placeholder {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .edn-display .comment {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .edn-display .number {
+      color: var(--accent-yellow);
+    }
+
+    .edn-display .hex {
+      color: var(--accent-orange);
+    }
+
+    .edn-display .punctuation {
+      color: var(--text-secondary);
+    }
+
+    .private-key-warning {
+      margin-top: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: rgba(255, 170, 0, 0.1);
+      border: 1px solid var(--accent-orange);
+      border-radius: 6px;
+      color: var(--accent-orange);
+      font-size: 0.8rem;
+    }
+
     .status {
       padding: 0.75rem 1rem;
       border-radius: 8px;
@@ -572,8 +617,25 @@
       accent-color: var(--accent-yellow);
     }
 
-    .disclosure-item .key-name {
+    .disclosure-item .disclosure-key {
       color: var(--accent-magenta);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .disclosure-item .disclosure-sep {
+      color: var(--text-muted);
+    }
+
+    .disclosure-item .disclosure-value {
+      color: var(--accent-green);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .disclosure-item .disclosure-salt {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', monospace;
+      margin-left: 0.5rem;
     }
 
     .key-section {
@@ -780,9 +842,28 @@
               <button class="small-btn primary" onclick="loadSpecHolderKey()">Load Spec Key</button>
               <button class="small-btn primary" onclick="generateHolderKey()">Generate New</button>
             </div>
-            <div class="form-group" style="margin-top: 0.75rem;">
-              <input type="text" id="holderKeyDisplay" readonly placeholder="No key loaded" style="font-size: 0.75rem;">
+            
+            <div class="form-group" style="margin-top: 1rem;">
+              <label>Public Key (EDN)</label>
+              <div id="holderKeyEdnDisplay" class="edn-display" style="min-height: 120px;">
+                <span class="edn-placeholder">Key will be displayed here in EDN format</span>
+              </div>
+              <div id="holderPrivateKeyWarning" class="private-key-warning" style="display: none;">
+                ⚠️ Private key present (not shown for security)
+              </div>
             </div>
+            
+            <details style="margin-top: 1rem;">
+              <summary style="cursor: pointer; color: var(--accent-cyan); font-size: 0.85rem;">Import Key from Hex</summary>
+              <div style="margin-top: 0.75rem;">
+                <div class="form-group">
+                  <label>Paste COSE Key (Hex)</label>
+                  <input type="text" id="holderKeyHexInput" placeholder="Paste hex-encoded COSE key here" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                </div>
+                <button class="small-btn primary" onclick="loadHolderKeyFromHex()" style="margin-top: 0.5rem;">Load from Hex</button>
+                <div id="holderKeyImportStatus"></div>
+              </div>
+            </details>
           </div>
           <div class="step-actions">
             <button class="primary" onclick="completeStep(1)" id="step1Next" disabled>Continue to Issuer Key →</button>
@@ -812,9 +893,28 @@
               <button class="small-btn primary" onclick="loadSpecIssuerKey()">Load Spec Key</button>
               <button class="small-btn primary" onclick="generateIssuerKey()">Generate New</button>
             </div>
-            <div class="form-group" style="margin-top: 0.75rem;">
-              <input type="text" id="issuerKeyDisplay" readonly placeholder="No key loaded" style="font-size: 0.75rem;">
+            
+            <div class="form-group" style="margin-top: 1rem;">
+              <label>Public Key (EDN)</label>
+              <div id="issuerKeyEdnDisplay" class="edn-display" style="min-height: 120px;">
+                <span class="edn-placeholder">Key will be displayed here in EDN format</span>
+              </div>
+              <div id="issuerPrivateKeyWarning" class="private-key-warning" style="display: none;">
+                ⚠️ Private key present (not shown for security)
+              </div>
             </div>
+            
+            <details style="margin-top: 1rem;">
+              <summary style="cursor: pointer; color: var(--accent-cyan); font-size: 0.85rem;">Import Key from Hex</summary>
+              <div style="margin-top: 0.75rem;">
+                <div class="form-group">
+                  <label>Paste COSE Key (Hex)</label>
+                  <input type="text" id="issuerKeyHexInput" placeholder="Paste hex-encoded COSE key here" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                </div>
+                <button class="small-btn primary" onclick="loadIssuerKeyFromHex()" style="margin-top: 0.5rem;">Load from Hex</button>
+                <div id="issuerKeyImportStatus"></div>
+              </div>
+            </details>
           </div>
           <div class="step-actions">
             <button class="btn-secondary" onclick="goToStep(1)">← Back</button>
@@ -1085,7 +1185,7 @@
         };
         issuerAlgorithm = 'ES384';
         
-        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'Spec ES384');
+        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'Spec ES384', true);
         showStatus('issuerStatus', 'Loaded Spec Issuer Key (ES384/P-384)', 'success');
       } catch (error) {
         showStatus('issuerStatus', 'Failed to load spec key: ' + error.message, 'error');
@@ -1101,7 +1201,7 @@
         };
         holderAlgorithm = 'ES256';
         
-        updateKeyDisplay('holder', holderKeyPair.publicKey, 'Spec ES256');
+        updateKeyDisplay('holder', holderKeyPair.publicKey, 'Spec ES256', true);
         showStatus('holderStatus', 'Loaded Spec Holder Key (ES256/P-256)', 'success');
       } catch (error) {
         showStatus('holderStatus', 'Failed to load spec key: ' + error.message, 'error');
@@ -1112,14 +1212,20 @@
       try {
         // Generate new ES256 key pair (P-256)
         const keyPair = await generateWebCryptoKeyPair('P-256');
-        issuerKeyPair = {
-          privateKey: createCoseKeyMap(keyPair.privateKey, 'ES256', true),
-          publicKey: createCoseKeyMap(keyPair.publicKey, 'ES256', false),
-        };
+        const privateKey = createCoseKeyMap(keyPair.privateKey, 'ES256', true);
+        const publicKey = createCoseKeyMap(keyPair.publicKey, 'ES256', false);
+        
+        // Compute thumbprint and set as kid
+        const thumbprintHex = SDCWT.coseSign1.coseKeyThumbprint(publicKey);
+        const thumbprintBytes = SDCWT.Hex.decode(thumbprintHex);
+        privateKey.set(2, thumbprintBytes);  // kid
+        publicKey.set(2, thumbprintBytes);   // kid
+        
+        issuerKeyPair = { privateKey, publicKey };
         issuerAlgorithm = 'ES256';
         
-        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'New ES256');
-        showStatus('issuerStatus', 'New Issuer Key generated (ES256/P-256)', 'success');
+        updateKeyDisplay('issuer', issuerKeyPair.publicKey, 'New ES256', true);
+        showStatus('issuerStatus', 'New Issuer Key generated (ES256/P-256) with kid', 'success');
       } catch (error) {
         showStatus('issuerStatus', 'Key generation failed: ' + error.message, 'error');
       }
@@ -1129,34 +1235,183 @@
       try {
         // Generate new ES256 key pair (P-256)
         const keyPair = await generateWebCryptoKeyPair('P-256');
-        holderKeyPair = {
-          privateKey: createCoseKeyMap(keyPair.privateKey, 'ES256', true),
-          publicKey: createCoseKeyMap(keyPair.publicKey, 'ES256', false),
-        };
+        const privateKey = createCoseKeyMap(keyPair.privateKey, 'ES256', true);
+        const publicKey = createCoseKeyMap(keyPair.publicKey, 'ES256', false);
+        
+        // Compute thumbprint and set as kid
+        const thumbprintHex = SDCWT.coseSign1.coseKeyThumbprint(publicKey);
+        const thumbprintBytes = SDCWT.Hex.decode(thumbprintHex);
+        privateKey.set(2, thumbprintBytes);  // kid
+        publicKey.set(2, thumbprintBytes);   // kid
+        
+        holderKeyPair = { privateKey, publicKey };
         holderAlgorithm = 'ES256';
         
-        updateKeyDisplay('holder', holderKeyPair.publicKey, 'New ES256');
-        showStatus('holderStatus', 'New Holder Key generated (ES256/P-256)', 'success');
+        updateKeyDisplay('holder', holderKeyPair.publicKey, 'New ES256', true);
+        showStatus('holderStatus', 'New Holder Key generated (ES256/P-256) with kid', 'success');
       } catch (error) {
         showStatus('holderStatus', 'Key generation failed: ' + error.message, 'error');
       }
     }
 
     // Update key display with thumbprint
-    function updateKeyDisplay(role, publicKey, label) {
+    function updateKeyDisplay(role, publicKey, label, hasPrivateKey = false) {
       const publicKeyHex = SDCWT.coseSign1.coseKeyToHex(publicKey);
-      const thumbprint = SDCWT.coseSign1.coseKeyThumbprint(publicKey);
-      const thumbprintShort = thumbprint.slice(0, 16) + '...';
+      const keyEdnHtml = formatCoseKeyAsEdnHtml(publicKey);
       
       if (role === 'issuer') {
-        document.getElementById('issuerKeyDisplay').value = 
-          `${label} | CKT: ${thumbprintShort}`;
         document.getElementById('issuerPublicKeyForVerifier').value = publicKeyHex;
+        document.getElementById('issuerKeyEdnDisplay').innerHTML = keyEdnHtml;
+        document.getElementById('issuerPrivateKeyWarning').style.display = hasPrivateKey ? 'block' : 'none';
       } else {
-        document.getElementById('holderKeyDisplay').value = 
-          `${label} | CKT: ${thumbprintShort}`;
+        document.getElementById('holderKeyEdnDisplay').innerHTML = keyEdnHtml;
+        document.getElementById('holderPrivateKeyWarning').style.display = hasPrivateKey ? 'block' : 'none';
         // Update the cnf claim in the EDN textarea
         updateCnfClaimInEdn(publicKey);
+      }
+    }
+    
+    // Format a COSE Key Map as EDN string with HTML syntax highlighting
+    // Ellide long hex strings for display: h'75726e3a...32636573'
+    function ellideHex(hexStr, maxLength = 24) {
+      if (hexStr.length <= maxLength) {
+        return hexStr;
+      }
+      const prefixLen = 8;
+      const suffixLen = 8;
+      return hexStr.slice(0, prefixLen) + '...' + hexStr.slice(-suffixLen);
+    }
+
+    function formatCoseKeyAsEdnHtml(coseKey) {
+      const kty = coseKey.get(1);
+      const alg = coseKey.get(3);
+      const crv = coseKey.get(-1);
+      const x = coseKey.get(-2);
+      const y = coseKey.get(-3);
+      
+      // Always compute the thumbprint to show as kid (CKT)
+      const thumbprint = SDCWT.coseSign1.coseKeyThumbprint(coseKey);
+      
+      // Get curve and algorithm names
+      const crvName = crv === 1 ? 'P-256' : crv === 2 ? 'P-384' : `${crv}`;
+      const algName = alg === -7 ? 'ES256' : alg === -35 ? 'ES384' : alg ? `${alg}` : null;
+      
+      // Helper for syntax highlighting
+      const comment = (text) => `<span class="comment">/ ${text} /</span>`;
+      const num = (n) => `<span class="number">${n}</span>`;
+      const hex = (h, ellide = true) => {
+        const display = ellide ? ellideHex(h) : h;
+        const title = h.length > 24 ? ` title="${h}"` : '';
+        return `<span class="hex"${title}>h'${display}'</span>`;
+      };
+      const punc = (p) => `<span class="punctuation">${p}</span>`;
+      
+      let lines = [punc('{')];
+      lines.push(`  ${comment('kty: EC2')} ${num(1)}${punc(':')} ${num(2)}${punc(',')}`);
+      
+      // Always show kid as the computed thumbprint (CKT)
+      lines.push(`  ${comment('kid: CKT')} ${num(2)}${punc(':')} ${hex(thumbprint)}${punc(',')}`);
+      
+      if (alg) {
+        lines.push(`  ${comment('alg: ' + algName)} ${num(3)}${punc(':')} ${num(alg)}${punc(',')}`);
+      }
+      
+      lines.push(`  ${comment('crv: ' + crvName)} ${num(-1)}${punc(':')} ${num(crv)}${punc(',')}`);
+      lines.push(`  ${comment('x')} ${num(-2)}${punc(':')} ${hex(SDCWT.Hex.encode(x))}${punc(',')}`);
+      lines.push(`  ${comment('y')} ${num(-3)}${punc(':')} ${hex(SDCWT.Hex.encode(y))}`);
+      
+      lines.push(punc('}'));
+      return lines.join('\n');
+    }
+    
+    // Load holder key from hex input
+    function loadHolderKeyFromHex() {
+      try {
+        const hexInput = document.getElementById('holderKeyHexInput').value.trim();
+        if (!hexInput) {
+          showStatus('holderKeyImportStatus', 'Please enter a hex-encoded COSE key', 'error');
+          return;
+        }
+        
+        const coseKey = SDCWT.coseKeyFromHex(hexInput);
+        const crv = coseKey.get(-1);
+        const hasPrivateKey = coseKey.has(-4);
+        
+        // Determine algorithm from curve
+        const alg = crv === 1 ? 'ES256' : crv === 2 ? 'ES384' : 'ES256';
+        holderAlgorithm = alg;
+        
+        if (hasPrivateKey) {
+          // Full key pair
+          const publicKey = new Map();
+          publicKey.set(1, coseKey.get(1));
+          if (coseKey.has(2)) publicKey.set(2, coseKey.get(2));
+          if (coseKey.has(3)) publicKey.set(3, coseKey.get(3));
+          publicKey.set(-1, coseKey.get(-1));
+          publicKey.set(-2, coseKey.get(-2));
+          publicKey.set(-3, coseKey.get(-3));
+          
+          holderKeyPair = {
+            privateKey: coseKey,
+            publicKey: publicKey
+          };
+        } else {
+          // Public key only - can be used for cnf but not for signing
+          holderKeyPair = {
+            privateKey: null,
+            publicKey: coseKey
+          };
+        }
+        
+        updateKeyDisplay('holder', holderKeyPair.publicKey, `Imported ${alg}`, hasPrivateKey);
+        showStatus('holderKeyImportStatus', `Loaded ${hasPrivateKey ? 'key pair' : 'public key'} (${alg})`, 'success');
+        showStatus('holderStatus', `Loaded ${hasPrivateKey ? 'key pair' : 'public key'} from hex`, 'success');
+      } catch (error) {
+        showStatus('holderKeyImportStatus', 'Failed to parse key: ' + error.message, 'error');
+      }
+    }
+    
+    // Load issuer key from hex input
+    function loadIssuerKeyFromHex() {
+      try {
+        const hexInput = document.getElementById('issuerKeyHexInput').value.trim();
+        if (!hexInput) {
+          showStatus('issuerKeyImportStatus', 'Please enter a hex-encoded COSE key', 'error');
+          return;
+        }
+        
+        const coseKey = SDCWT.coseKeyFromHex(hexInput);
+        const crv = coseKey.get(-1);
+        const hasPrivateKey = coseKey.has(-4);
+        
+        if (!hasPrivateKey) {
+          showStatus('issuerKeyImportStatus', 'Issuer key must include private key for signing', 'error');
+          return;
+        }
+        
+        // Determine algorithm from curve
+        const alg = crv === 1 ? 'ES256' : crv === 2 ? 'ES384' : 'ES256';
+        issuerAlgorithm = alg;
+        
+        // Create public-only version
+        const publicKey = new Map();
+        publicKey.set(1, coseKey.get(1));
+        if (coseKey.has(2)) publicKey.set(2, coseKey.get(2));
+        if (coseKey.has(3)) publicKey.set(3, coseKey.get(3));
+        publicKey.set(-1, coseKey.get(-1));
+        publicKey.set(-2, coseKey.get(-2));
+        publicKey.set(-3, coseKey.get(-3));
+        
+        issuerKeyPair = {
+          privateKey: coseKey,
+          publicKey: publicKey
+        };
+        
+        updateKeyDisplay('issuer', issuerKeyPair.publicKey, `Imported ${alg}`, true);
+        showStatus('issuerKeyImportStatus', `Loaded key pair (${alg})`, 'success');
+        showStatus('issuerStatus', `Loaded issuer key pair from hex`, 'success');
+      } catch (error) {
+        showStatus('issuerKeyImportStatus', 'Failed to parse key: ' + error.message, 'error');
       }
     }
     
@@ -1427,16 +1682,46 @@
 
       disclosures.forEach((disclosure, index) => {
         const decoded = SDCWT.cbor.decode(disclosure);
-        const [salt, key, value] = decoded;
+        // SD-CWT spec disclosure format:
+        // - Named claims (map entries): [salt, value, key]
+        // - Array items: [salt, value]
+        const salt = decoded[0];
+        const claimValue = decoded[1];
+        const claimKey = decoded.length > 2 ? decoded[2] : null;
+        
+        // Format salt as ellided hex
+        const saltHex = SDCWT.Hex.encode(salt);
+        const saltDisplay = ellideHex(saltHex, 16);
 
         const item = document.createElement('div');
         item.className = 'disclosure-item';
-        item.innerHTML = `
-          <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
-          <span class="key-name">${key}</span>: ${formatValuePreview(value)}
-        `;
+        
+        if (claimKey !== null) {
+          // Named claim: display as key : value (salt: ...)
+          item.innerHTML = `
+            <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+            <span class="disclosure-key">${formatKeyPreview(claimKey)}</span>
+            <span class="disclosure-sep">:</span>
+            <span class="disclosure-value">${formatValuePreview(claimValue)}</span>
+            <span class="disclosure-salt" title="${saltHex}">(salt: ${saltDisplay})</span>
+          `;
+        } else {
+          // Array item: display just the value (salt: ...)
+          item.innerHTML = `
+            <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+            <span class="disclosure-value">${formatValuePreview(claimValue)}</span>
+            <span class="disclosure-salt" title="${saltHex}">(salt: ${saltDisplay})</span>
+          `;
+        }
         container.appendChild(item);
       });
+    }
+    
+    function formatKeyPreview(key) {
+      if (typeof key === 'string') {
+        return `"${key}"`;
+      }
+      return String(key);
     }
 
     function formatValuePreview(value) {
@@ -1801,10 +2086,10 @@
       issuedToken = null;
       disclosures = [];
       
-      document.getElementById('holderKeyDisplay').value = '';
-      document.getElementById('holderKeyDisplay').placeholder = 'No key loaded';
-      document.getElementById('issuerKeyDisplay').value = '';
-      document.getElementById('issuerKeyDisplay').placeholder = 'No key loaded';
+      document.getElementById('holderKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here in EDN format</span>';
+      document.getElementById('holderPrivateKeyWarning').style.display = 'none';
+      document.getElementById('issuerKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here in EDN format</span>';
+      document.getElementById('issuerPrivateKeyWarning').style.display = 'none';
       document.getElementById('issuerOutput').style.display = 'none';
       document.getElementById('holderOutput').style.display = 'none';
       document.getElementById('verifierOutput').style.display = 'none';
