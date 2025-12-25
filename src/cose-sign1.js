@@ -524,9 +524,10 @@ export function generateKeyPair(algorithm = Algorithm.ES256) {
   const { privateKey, publicKey } = sign1.generateKeyPair(algId);
   const curve = AlgToCurve[algorithm];
 
-  // Create COSE Key Maps
+  // Create COSE Key Maps with algorithm
   const privateKeyMap = new Map();
   privateKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+  privateKeyMap.set(CoseKeyParam.Alg, algId);  // Store algorithm in key
   privateKeyMap.set(CoseKeyParam.Crv, curve);
   privateKeyMap.set(CoseKeyParam.X, new Uint8Array(privateKey.x));
   privateKeyMap.set(CoseKeyParam.Y, new Uint8Array(privateKey.y));
@@ -534,9 +535,15 @@ export function generateKeyPair(algorithm = Algorithm.ES256) {
 
   const publicKeyMap = new Map();
   publicKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+  publicKeyMap.set(CoseKeyParam.Alg, algId);  // Store algorithm in key
   publicKeyMap.set(CoseKeyParam.Crv, curve);
   publicKeyMap.set(CoseKeyParam.X, new Uint8Array(publicKey.x));
   publicKeyMap.set(CoseKeyParam.Y, new Uint8Array(publicKey.y));
+
+  // Compute and store thumbprint as kid (key ID)
+  const thumbprint = computeCoseKeyThumbprint(publicKeyMap);
+  privateKeyMap.set(CoseKeyParam.Kid, thumbprint);
+  publicKeyMap.set(CoseKeyParam.Kid, thumbprint);
 
   return {
     privateKey: privateKeyMap,

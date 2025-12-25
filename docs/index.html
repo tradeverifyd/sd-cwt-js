@@ -522,6 +522,94 @@
       margin-bottom: 1rem;
     }
 
+    select {
+      width: 100%;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.875rem 1rem;
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-family: inherit;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(242, 70, 13, 0.1);
+    }
+
+    select option {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    /* Custom Radio Buttons for Example Selection */
+    .example-radio-group {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .example-radio {
+      display: none;
+    }
+
+    .example-radio-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.625rem 1rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      transition: all 0.15s ease;
+    }
+
+    .example-radio-label:hover {
+      border-color: var(--accent-primary);
+      color: var(--text-primary);
+    }
+
+    .example-radio:checked + .example-radio-label {
+      background: rgba(242, 70, 13, 0.1);
+      border-color: var(--accent-primary);
+      color: var(--accent-primary);
+    }
+
+    .example-radio-dot {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border-color);
+      border-radius: 50%;
+      position: relative;
+      transition: all 0.15s ease;
+    }
+
+    .example-radio:checked + .example-radio-label .example-radio-dot {
+      border-color: var(--accent-primary);
+    }
+
+    .example-radio:checked + .example-radio-label .example-radio-dot::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 6px;
+      height: 6px;
+      background: var(--accent-primary);
+      border-radius: 50%;
+    }
+
     button {
       width: 100%;
       padding: 0.875rem 1.5rem;
@@ -1130,6 +1218,28 @@
         </div>
         <div class="step-content">
           <div class="form-group">
+            <label>Trade Document</label>
+            <div class="example-radio-group" id="exampleRadioGroup">
+              <input type="radio" name="exampleTemplate" id="example-facility" value="facility-inspection" class="example-radio" checked onchange="loadExample(this.value)">
+              <label for="example-facility" class="example-radio-label">
+                <span class="example-radio-dot"></span>
+                Facility Inspection
+              </label>
+              
+              <input type="radio" name="exampleTemplate" id="example-mbl" value="bill-of-lading" class="example-radio" onchange="loadExample(this.value)">
+              <label for="example-mbl" class="example-radio-label">
+                <span class="example-radio-dot"></span>
+                Bill of Lading
+              </label>
+              
+              <input type="radio" name="exampleTemplate" id="example-invoice" value="commercial-invoice" class="example-radio" onchange="loadExample(this.value)">
+              <label for="example-invoice" class="example-radio-label">
+                <span class="example-radio-dot"></span>
+                Commercial Invoice
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
             <label>Claims to be Issued (EDN)</label>
             <textarea id="issuerClaimsEdn" class="tall" placeholder='{
   1: "https://issuer.example",
@@ -1324,7 +1434,12 @@
     // - Tag 58 on array elements: marks array elements for redaction  
     // - Tag 61 (decoys): inserts fake redacted entries to hide count
     // The cnf claim (8) will be auto-populated from the holder's public key
-    const SPEC_CLAIMS_EDN = `{
+    
+    // Example templates - each demonstrates different SD-CWT features
+    const EXAMPLES = {
+      'facility-inspection': {
+        name: 'Facility Inspection',
+        claims: `{
   / iss / 1: "https://issuer.example",
   / sub / 2: "https://device.example",
   / exp / 4: 1725330600,
@@ -1352,9 +1467,134 @@
     / decoy: adds 1 fake redacted entry / 61(1): null
   },
   / decoy: adds 1 fake redacted entry at top level / 61(1): null
-}`;
+}`
+      },
+      
+      'bill-of-lading': {
+        name: 'Multimodal Bill of Lading (MBL)',
+        claims: `{
+  / iss / 1: "https://carrier.example",
+  / sub / 2: "https://consignee.example",
+  / exp / 4: 1756857600,
+  / iat / 6: 1725244200,
+  / cnf / 8: {
+    / COSE_Key / 1: {
+      / kty: EC2 / 1: 2,
+      / crv: P-256 / -1: 1,
+      / x / -2: h'8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d',
+      / y / -3: h'4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'
+    }
+  },
+  / bl_number / 600: "MBLX-2024-78542",
+  / to be redacted: shipper / 58(601): {
+    "name": "Acme Exports Ltd",
+    "address": "123 Trade St, Singapore"
+  },
+  / transport_modes - nested array with redacted elements / 602: [
+    {
+      "mode": "sea",
+      / to be redacted: vessel / 58("vessel"): "MV Pacific Star",
+      "port_load": "SGSIN",
+      "port_discharge": "USNYC"
+    },
+    {
+      "mode": "rail",
+      / to be redacted: carrier_code / 58("carrier"): "BNSF-4521"
+    }
+  ],
+  / cargo - array of tagged items / 603: [
+    / to be redacted / 58({
+      "description": "Electronic Components",
+      "weight_kg": 2500,
+      "container": "MSCU-1234567"
+    }),
+    / to be redacted / 58({
+      "description": "Machine Parts", 
+      "weight_kg": 1800,
+      "container": "MSCU-7654321"
+    })
+  ],
+  / total_weight_kg / 604: 4300,
+  / decoy / 61(2): null
+}`
+      },
+      
+      'commercial-invoice': {
+        name: 'Commercial Invoice',
+        claims: `{
+  / iss / 1: "https://exporter.example",
+  / sub / 2: "https://importer.example",
+  / exp / 4: 1756857600,
+  / iat / 6: 1725244200,
+  / cnf / 8: {
+    / COSE_Key / 1: {
+      / kty: EC2 / 1: 2,
+      / crv: P-256 / -1: 1,
+      / x / -2: h'8554eb275dcd6fbd1c7ac641aa2c90d92022fd0d3024b5af18c7cc61ad527a2d',
+      / y / -3: h'4dc7ae2c677e96d0cc82597655ce92d5503f54293d87875d1e79ce4770194343'
+    }
+  },
+  / invoice_number / 700: "INV-2024-00892",
+  / to be redacted: buyer / 58(701): {
+    "company": "Global Imports Inc",
+    / to be redacted: tax_id / 58("tax_id"): "US-EIN-12-3456789",
+    "country": "US"
+  },
+  / line_items - array with nested redactions / 702: [
+    {
+      "hs_code": "8471.30",
+      "description": "Laptop Computers",
+      "quantity": 100,
+      / to be redacted: unit_price / 58("unit_price"): 850.00,
+      / to be redacted: line_total / 58("line_total"): 85000.00
+    },
+    {
+      "hs_code": "8471.60",
+      "description": "Computer Monitors",
+      "quantity": 50,
+      / to be redacted: unit_price / 58("unit_price"): 320.00,
+      / to be redacted: line_total / 58("line_total"): 16000.00
+    }
+  ],
+  / to be redacted: total_value / 58(703): 101000.00,
+  / currency / 704: "USD",
+  / incoterms / 705: "CIF",
+  / payment_terms - tagged map / 706: {
+    "method": "letter_of_credit",
+    / to be redacted: bank / 58("bank"): "HSBC Hong Kong",
+    / to be redacted: lc_number / 58("lc_number"): "LC-HK-2024-5567"
+  },
+  / decoy / 61(1): null
+}`
+      }
+    };
 
-    document.getElementById('issuerClaimsEdn').value = SPEC_CLAIMS_EDN;
+    // Load an example by key
+    function loadExample(exampleKey) {
+      const example = EXAMPLES[exampleKey];
+      if (!example) return;
+      
+      document.getElementById('issuerClaimsEdn').value = example.claims;
+      
+      // Update radio button selection
+      const radioMap = {
+        'facility-inspection': 'example-facility',
+        'bill-of-lading': 'example-mbl',
+        'commercial-invoice': 'example-invoice'
+      };
+      const radioId = radioMap[exampleKey];
+      if (radioId) {
+        document.getElementById(radioId).checked = true;
+      }
+      
+      // Update cnf claim with current holder key if available
+      if (holderKeyPair && holderKeyPair.publicKey) {
+        updateCnfClaimInEdn(holderKeyPair.publicKey);
+      }
+    }
+
+    // Initialize with Facility Inspection example
+    document.getElementById('issuerClaimsEdn').value = EXAMPLES['facility-inspection'].claims;
     document.getElementById('holderAudience').value = 'https://verifier.example';
     document.getElementById('verifierAudience').value = 'https://verifier.example';
 
@@ -1693,10 +1933,12 @@
     function createCoseKeyMap(key, algorithm, includePrivate) {
       // COSE Key parameters
       const kty = 2;  // EC2
-      const crv = algorithm === 'ES384' ? 2 : 1;  // P-384 = 2, P-256 = 1
+      const crv = algorithm === 'ES384' ? 2 : (algorithm === 'ES512' ? 3 : 1);  // P-384 = 2, P-521 = 3, P-256 = 1
+      const alg = algorithm === 'ES384' ? -35 : (algorithm === 'ES512' ? -36 : -7);  // ES256 = -7, ES384 = -35, ES512 = -36
       
       const coseKey = new Map();
       coseKey.set(1, kty);   // kty
+      coseKey.set(3, alg);   // alg - store algorithm in key
       coseKey.set(-1, crv);  // crv
       coseKey.set(-2, key.x); // x
       coseKey.set(-3, key.y); // y
