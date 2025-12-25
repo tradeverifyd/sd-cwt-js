@@ -3954,10 +3954,22 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
     8: "cnf",
     39: "cnonce"
   };
-  function getClaimComment(key) {
-    const name = CWT_CLAIM_NAMES[key];
-    return name ? `/ ${name} / ` : "";
-  }
+  var COSE_KEY_NAMES = {
+    1: "kty",
+    2: "kid",
+    3: "alg",
+    4: "key_ops",
+    5: "Base IV",
+    [-1]: "crv",
+    [-2]: "x",
+    [-3]: "y",
+    [-4]: "d"
+  };
+  var CNF_INNER_NAMES = {
+    1: "COSE_Key",
+    2: "Encrypted_COSE_Key",
+    3: "kid"
+  };
   function getRedactionComment(key) {
     if (key instanceof i && key.tag === 58) {
       if (typeof key.contents === "number") {
@@ -3995,7 +4007,7 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
      * @returns {string}
      */
     formatClaims(claims) {
-      return formatMapWithComments(claims, 0, true);
+      return formatMapWithComments(claims, 0, "claims");
     }
   };
   function ednStringify(value, indent, depth) {
@@ -4073,7 +4085,32 @@ ${pad}}`;
     }
     return String(value);
   }
-  function formatMapWithComments(map, depth, addComments = false) {
+  function getKeyComment(key, context) {
+    if (typeof key !== "number") return "";
+    if (context === "claims") {
+      const name = CWT_CLAIM_NAMES[key];
+      return name ? `/ ${name} / ` : "";
+    }
+    if (context === "cnf") {
+      const name = CNF_INNER_NAMES[key];
+      return name ? `/ ${name} / ` : "";
+    }
+    if (context === "cose_key") {
+      const name = COSE_KEY_NAMES[key];
+      if (name) {
+        if (key === 1) {
+          return `/ ${name} / `;
+        }
+        if (key === -1) {
+          return `/ ${name} / `;
+        }
+        return `/ ${name} / `;
+      }
+      return "";
+    }
+    return "";
+  }
+  function formatMapWithComments(map, depth, context = null) {
     if (!(map instanceof Map) || map.size === 0) {
       return "{}";
     }
@@ -4082,21 +4119,27 @@ ${pad}}`;
     const entries = [];
     for (const [key, value] of map) {
       let comment = "";
+      let valueContext = null;
       const redaction = getRedactionComment(key);
       if (redaction.isRedacted) {
         comment = redaction.comment;
-      } else if (addComments && typeof key === "number") {
-        comment = getClaimComment(key);
+      } else if (context) {
+        comment = getKeyComment(key, context);
+        if (context === "claims" && key === 8) {
+          valueContext = "cnf";
+        } else if (context === "cnf" && key === 1) {
+          valueContext = "cose_key";
+        }
       }
-      const keyStr = formatValueWithComments(key, depth + 1);
-      const valStr = formatValueWithComments(value, depth + 1);
+      const keyStr = formatValueWithComments(key, depth + 1, valueContext);
+      const valStr = formatValueWithComments(value, depth + 1, valueContext);
       entries.push(`${pad1}${comment}${keyStr}: ${valStr}`);
     }
     return `{
 ${entries.join(",\n")}
 ${pad}}`;
   }
-  function formatValueWithComments(value, depth) {
+  function formatValueWithComments(value, depth, context = null) {
     const pad = "  ".repeat(depth);
     const pad1 = "  ".repeat(depth + 1);
     if (value === null) return "null";
@@ -4119,18 +4162,18 @@ ${pad}}`;
       if (value.tag === 60) {
         return "null";
       }
-      const tagContent = formatValueWithComments(value.contents, depth);
+      const tagContent = formatValueWithComments(value.contents, depth, context);
       return `${value.tag}(${tagContent})`;
     }
     if (value && typeof value === "object" && value.type === "simple") {
       return `simple(${value.value})`;
     }
     if (value instanceof Map) {
-      return formatMapWithComments(value, depth, false);
+      return formatMapWithComments(value, depth, context);
     }
     if (Array.isArray(value)) {
       if (value.length === 0) return "[]";
-      const items = value.map((v2) => `${pad1}${formatValueWithComments(v2, depth + 1)}`);
+      const items = value.map((v2) => `${pad1}${formatValueWithComments(v2, depth + 1, context)}`);
       return `[
 ${items.join(",\n")}
 ${pad}]`;

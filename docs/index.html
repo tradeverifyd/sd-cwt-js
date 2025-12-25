@@ -10,7 +10,7 @@
   <style>
     :root {
       /* Tradeverifyd Dark Mode Color Palette */
-      --bg-primary: #0E1014;
+      --bg-primary: #050506;
       --bg-secondary: #1a1b1f;
       --bg-tertiary: #2D2E32;
       --bg-elevated: #3a3b40;
@@ -21,8 +21,8 @@
       --text-muted: #51545C;
       
       /* Accent Colors */
-      --accent-orange: #F2460D;
-      --accent-orange-light: #ff6b3d;
+      --accent-primary: #F2460D;
+      --accent-primary-light: #ff6b3d;
       --accent-blue: #2F69C1;
       --accent-light-blue: #9FD0F8;
       
@@ -34,7 +34,7 @@
       /* Border & Effects */
       --border-color: #3a3b40;
       --border-subtle: #2D2E32;
-      --glow-orange: 0 0 24px rgba(242, 70, 13, 0.25);
+      --glow-primary: 0 0 24px rgba(242, 70, 13, 0.25);
       --glow-blue: 0 0 20px rgba(47, 105, 193, 0.3);
       
       /* Glass Effect */
@@ -87,7 +87,7 @@
     header {
       padding: 2.5rem 3rem;
       border-bottom: 1px solid var(--border-subtle);
-      background: rgba(14, 16, 20, 0.85);
+      background: rgba(5, 5, 6, 0.9);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
     }
@@ -124,7 +124,7 @@
     }
 
     .brand-mark .product-name span {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
     }
 
     header p {
@@ -135,13 +135,13 @@
     }
 
     header p a {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
       text-decoration: none;
       transition: color 0.2s ease;
     }
 
     header p a:hover {
-      color: var(--accent-orange-light);
+      color: var(--accent-primary-light);
     }
 
 
@@ -214,10 +214,10 @@
     }
 
     .progress-step.active .step-number {
-      background: var(--accent-orange);
-      border-color: var(--accent-orange);
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
       color: white;
-      box-shadow: var(--glow-orange);
+      box-shadow: var(--glow-primary);
     }
 
     .progress-step.completed .step-number {
@@ -245,7 +245,7 @@
     }
 
     .progress-step.active .step-label {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
       font-weight: 600;
     }
 
@@ -271,8 +271,8 @@
     }
 
     .step-section.active {
-      border-color: var(--accent-orange);
-      box-shadow: var(--glow-orange);
+      border-color: var(--accent-primary);
+      box-shadow: var(--glow-primary);
     }
 
     .step-section.completed {
@@ -314,7 +314,7 @@
     }
 
     .step-section.active .step-icon {
-      background: var(--accent-orange);
+      background: var(--accent-primary);
     }
 
     .step-section.completed .step-icon {
@@ -340,7 +340,7 @@
 
     .step-section.active .step-status {
       background: rgba(242, 70, 13, 0.15);
-      color: var(--accent-orange);
+      color: var(--accent-primary);
     }
 
     .step-section.completed .step-status {
@@ -401,13 +401,13 @@
     }
 
     .card:hover {
-      border-color: var(--accent-orange);
-      box-shadow: var(--glow-orange);
+      border-color: var(--accent-primary);
+      box-shadow: var(--glow-primary);
     }
 
     .card.issuer:hover {
-      border-color: var(--accent-orange);
-      box-shadow: var(--glow-orange);
+      border-color: var(--accent-primary);
+      box-shadow: var(--glow-primary);
     }
 
     .card.holder:hover {
@@ -439,7 +439,7 @@
     }
 
     .issuer .card-header .icon {
-      background: var(--accent-orange);
+      background: var(--accent-primary);
     }
 
     .holder .card-header .icon {
@@ -484,7 +484,7 @@
 
     textarea:focus, input:focus {
       outline: none;
-      border-color: var(--accent-orange);
+      border-color: var(--accent-primary);
       box-shadow: 0 0 0 3px rgba(242, 70, 13, 0.1);
     }
 
@@ -514,18 +514,18 @@
     }
 
     button.primary {
-      background: var(--accent-orange);
+      background: var(--accent-primary);
       color: white;
     }
 
     button.primary:hover {
-      background: var(--accent-orange-light);
+      background: var(--accent-primary-light);
       transform: translateY(-1px);
-      box-shadow: var(--glow-orange);
+      box-shadow: var(--glow-primary);
     }
 
     .issuer button.primary {
-      background: var(--accent-orange);
+      background: var(--accent-primary);
     }
 
     .holder button.primary {
@@ -573,7 +573,7 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.75rem;
       word-break: break-all;
-      color: var(--accent-orange);
+      color: var(--accent-primary);
       max-height: 200px;
       overflow-y: auto;
       user-select: all;
@@ -593,7 +593,7 @@
     }
 
     .edn-output .key {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
     }
 
     .edn-output .string {
@@ -683,8 +683,8 @@
 
     .status.info {
       background: rgba(242, 70, 13, 0.1);
-      border: 1px solid var(--accent-orange);
-      color: var(--accent-orange);
+      border: 1px solid var(--accent-primary);
+      color: var(--accent-primary);
     }
 
     .disclosure-list {
@@ -706,11 +706,11 @@
 
     .disclosure-item input[type="checkbox"] {
       width: auto;
-      accent-color: var(--accent-orange);
+      accent-color: var(--accent-primary);
     }
 
     .disclosure-item .disclosure-key {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
       font-family: 'JetBrains Mono', monospace;
     }
 
@@ -823,7 +823,7 @@
     .copy-btn:hover {
       background: var(--bg-elevated);
       color: var(--text-primary);
-      border-color: var(--accent-orange);
+      border-color: var(--accent-primary);
     }
 
     .tabs {
@@ -847,8 +847,8 @@
 
     .tab.active {
       background: var(--bg-primary);
-      color: var(--accent-orange);
-      border-color: var(--accent-orange);
+      color: var(--accent-primary);
+      border-color: var(--accent-primary);
       border-bottom: 1px solid var(--bg-primary);
       margin-bottom: -1px;
     }
@@ -868,21 +868,24 @@
 
     footer {
       text-align: center;
-      padding: 2.5rem 2rem;
-      color: var(--text-muted);
+      padding: 2.5rem 3rem;
+      color: var(--text-secondary);
       font-size: 0.85rem;
       border-top: 1px solid var(--border-subtle);
       margin-top: 2rem;
+      background: rgba(5, 5, 6, 0.9);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
     }
 
     footer a {
-      color: var(--accent-orange);
+      color: var(--accent-primary);
       text-decoration: none;
       transition: color 0.2s ease;
     }
 
     footer a:hover {
-      color: var(--accent-orange-light);
+      color: var(--accent-primary-light);
     }
 
     .loading {
@@ -1009,7 +1012,7 @@
       <div class="step-section active expanded" id="step1" data-step="1">
         <div class="step-header" onclick="toggleStep(1)">
           <div class="step-header-left">
-            <div class="step-icon">👤</div>
+            <div class="step-icon">1</div>
             <div>
               <h2>Step 1: Holder Key</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Generate or load the holder's key pair</p>
@@ -1021,37 +1024,28 @@
           </div>
         </div>
         <div class="step-content">
-          <div class="key-section">
-            <h3>Holder Key Pair (ES256)</h3>
-            <div class="btn-row">
-              <button class="small-btn primary" onclick="loadSpecHolderKey()">Load Spec Key</button>
-              <button class="small-btn primary" onclick="generateHolderKey()">Generate New</button>
+          <div class="form-group" style="margin-top: 0.5rem;">
+            <label>Current Holder Key (EDN)</label>
+            <div id="holderKeyEdnDisplay" class="edn-display" style="min-height: 100px;">
+              <span class="edn-placeholder">Loading spec key...</span>
             </div>
-            
-            <div class="form-group" style="margin-top: 1rem;">
-              <label>Public Key (EDN)</label>
-              <div id="holderKeyEdnDisplay" class="edn-display" style="min-height: 120px;">
-                <span class="edn-placeholder">Key will be displayed here in EDN format</span>
-              </div>
-              <div id="holderPrivateKeyWarning" class="private-key-warning" style="display: none;">
-                ⚠️ Private key present (not shown for security)
-              </div>
+            <div id="holderPrivateKeyWarning" class="private-key-warning" style="display: none;">
+              ⚠️ Private key present (not shown for security)
             </div>
-            
-            <details style="margin-top: 1rem;">
-              <summary style="cursor: pointer; color: var(--accent-orange); font-size: 0.85rem;">Import Key from Hex</summary>
-              <div style="margin-top: 0.75rem;">
-                <div class="form-group">
-                  <label>Paste COSE Key (Hex)</label>
-                  <input type="text" id="holderKeyHexInput" placeholder="Paste hex-encoded COSE key here" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                </div>
-                <button class="small-btn primary" onclick="loadHolderKeyFromHex()" style="margin-top: 0.5rem;">Load from Hex</button>
-                <div id="holderKeyImportStatus"></div>
-              </div>
-            </details>
           </div>
+          <details style="margin-top: 0.75rem;">
+            <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">Generate or Import Different Key</summary>
+            <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;">
+              <button class="btn-secondary" onclick="generateHolderKeyOnly()">Generate New Key</button>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <input type="text" id="holderKeyHexInput" placeholder="Paste hex-encoded COSE key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; flex: 1;">
+                <button class="btn-secondary small-btn" onclick="loadHolderKeyFromHexOnly()">Load</button>
+              </div>
+              <div id="holderKeyImportStatus"></div>
+            </div>
+          </details>
           <div class="step-actions">
-            <button class="primary" onclick="completeStep(1)" id="step1Next" disabled>Continue to Issuer Key →</button>
+            <button class="primary" onclick="completeStep(1)" id="step1Next">Continue</button>
           </div>
         </div>
       </div>
@@ -1060,7 +1054,7 @@
       <div class="step-section locked" id="step2" data-step="2">
         <div class="step-header" onclick="toggleStep(2)">
           <div class="step-header-left">
-            <div class="step-icon">🏛️</div>
+            <div class="step-icon">2</div>
             <div>
               <h2>Step 2: Issuer Key</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Generate or load the issuer's key pair</p>
@@ -1072,38 +1066,28 @@
           </div>
         </div>
         <div class="step-content">
-          <div class="key-section">
-            <h3>Issuer Key Pair (ES384 for spec, ES256 for new)</h3>
-            <div class="btn-row">
-              <button class="small-btn primary" onclick="loadSpecIssuerKey()">Load Spec Key</button>
-              <button class="small-btn primary" onclick="generateIssuerKey()">Generate New</button>
+          <div class="form-group" style="margin-top: 0.5rem;">
+            <label>Current Issuer Key (EDN)</label>
+            <div id="issuerKeyEdnDisplay" class="edn-display" style="min-height: 100px;">
+              <span class="edn-placeholder">Loading spec key...</span>
             </div>
-            
-            <div class="form-group" style="margin-top: 1rem;">
-              <label>Public Key (EDN)</label>
-              <div id="issuerKeyEdnDisplay" class="edn-display" style="min-height: 120px;">
-                <span class="edn-placeholder">Key will be displayed here in EDN format</span>
-              </div>
-              <div id="issuerPrivateKeyWarning" class="private-key-warning" style="display: none;">
-                ⚠️ Private key present (not shown for security)
-              </div>
+            <div id="issuerPrivateKeyWarning" class="private-key-warning" style="display: none;">
+              ⚠️ Private key present (not shown for security)
             </div>
-            
-            <details style="margin-top: 1rem;">
-              <summary style="cursor: pointer; color: var(--accent-orange); font-size: 0.85rem;">Import Key from Hex</summary>
-              <div style="margin-top: 0.75rem;">
-                <div class="form-group">
-                  <label>Paste COSE Key (Hex)</label>
-                  <input type="text" id="issuerKeyHexInput" placeholder="Paste hex-encoded COSE key here" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
-                </div>
-                <button class="small-btn primary" onclick="loadIssuerKeyFromHex()" style="margin-top: 0.5rem;">Load from Hex</button>
-                <div id="issuerKeyImportStatus"></div>
-              </div>
-            </details>
           </div>
+          <details style="margin-top: 0.75rem;">
+            <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">Generate or Import Different Key</summary>
+            <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem;">
+              <button class="btn-secondary" onclick="generateIssuerKeyOnly()">Generate New Key</button>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <input type="text" id="issuerKeyHexInput" placeholder="Paste hex-encoded COSE key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; flex: 1;">
+                <button class="btn-secondary small-btn" onclick="loadIssuerKeyFromHexOnly()">Load</button>
+              </div>
+              <div id="issuerKeyImportStatus"></div>
+            </div>
+          </details>
           <div class="step-actions">
-            <button class="btn-secondary" onclick="goToStep(1)">← Back</button>
-            <button class="primary" onclick="completeStep(2)" id="step2Next" disabled>Continue to Issue →</button>
+            <button class="primary" onclick="completeStep(2)" id="step2Next">Continue</button>
           </div>
         </div>
       </div>
@@ -1112,7 +1096,7 @@
       <div class="step-section locked" id="step3" data-step="3">
         <div class="step-header" onclick="toggleStep(3)">
           <div class="step-header-left">
-            <div class="step-icon">📋</div>
+            <div class="step-icon">3</div>
             <div>
               <h2>Step 3: Issue SD-CWT</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Create the selectively disclosable CWT</p>
@@ -1133,8 +1117,6 @@
 }'></textarea>
           </div>
 
-          <button class="primary" onclick="issueCWT()" style="margin-top: 1rem;">Issue SD-CWT</button>
-
           <div class="output-section" id="issuerOutput" style="display: none;">
             <div class="output-header">
               <div class="output-label">Issued SD-CWT (Hex)</div>
@@ -1145,8 +1127,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="btn-secondary" onclick="goToStep(2)">← Back</button>
-            <button class="primary" onclick="completeStep(3)" id="step3Next" disabled>Continue to Present →</button>
+            <button class="primary" onclick="issueCWTAndContinue()" id="step3Next">Issue SD-CWT</button>
           </div>
         </div>
       </div>
@@ -1155,7 +1136,7 @@
       <div class="step-section locked" id="step4" data-step="4">
         <div class="step-header" onclick="toggleStep(4)">
           <div class="step-header-left">
-            <div class="step-icon">🎫</div>
+            <div class="step-icon">4</div>
             <div>
               <h2>Step 4: Create Presentation</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Select disclosures and create a presentation</p>
@@ -1167,10 +1148,7 @@
           </div>
         </div>
         <div class="step-content">
-          <div class="form-group">
-            <label>SD-CWT to Present (Hex)</label>
-            <textarea id="holderCwt" placeholder="Paste the issued SD-CWT hex here"></textarea>
-          </div>
+          <textarea id="holderCwt" style="display: none;"></textarea>
 
           <div class="form-group">
             <label>Audience</label>
@@ -1187,8 +1165,6 @@
             <div class="disclosure-list" id="disclosureList"></div>
           </div>
 
-          <button class="primary" onclick="createPresentation()" style="margin-top: 1rem;">Create Presentation</button>
-
           <div class="output-section" id="holderOutput" style="display: none;">
             <div class="output-header">
               <div class="output-label">Presentation (SD-KBT Hex)</div>
@@ -1199,8 +1175,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="btn-secondary" onclick="goToStep(3)">← Back</button>
-            <button class="primary" onclick="completeStep(4)" id="step4Next" disabled>Continue to Verify →</button>
+            <button class="primary" onclick="createPresentationAndContinue()" id="step4Next">Create Presentation</button>
           </div>
         </div>
       </div>
@@ -1209,7 +1184,7 @@
       <div class="step-section locked" id="step5" data-step="5">
         <div class="step-header" onclick="toggleStep(5)">
           <div class="step-header-left">
-            <div class="step-icon">✓</div>
+            <div class="step-icon">5</div>
             <div>
               <h2>Step 5: Verify Presentation</h2>
               <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Verify the presentation and view disclosed claims</p>
@@ -1221,17 +1196,18 @@
           </div>
         </div>
         <div class="step-content">
-          <div class="form-group">
-            <label>Presentation (SD-KBT Hex)</label>
-            <textarea id="verifierPresentation" placeholder="Paste the presentation hex here"></textarea>
+          <textarea id="verifierPresentation" style="display: none;"></textarea>
+          <input type="text" id="issuerPublicKeyForVerifier" style="display: none;">
+
+          <div class="output-section" id="verifierInputDisplay">
+            <div class="output-header">
+              <div class="output-label">Presented SD-CWT (Hex)</div>
+              <button class="copy-btn" onclick="copyToClipboard('presentedCwtHex')">Copy</button>
+            </div>
+            <div class="hex-output" id="presentedCwtHex" style="max-height: 120px;"></div>
           </div>
 
-          <div class="form-group">
-            <label>Issuer Public Key (Hex)</label>
-            <input type="text" id="issuerPublicKeyForVerifier" placeholder="Issuer's public key">
-          </div>
-
-          <div class="form-group">
+          <div class="form-group" style="margin-top: 1.5rem;">
             <label>Expected Audience</label>
             <input type="text" id="verifierAudience" placeholder="https://verifier.example.com">
           </div>
@@ -1241,8 +1217,6 @@
             <input type="text" id="verifierNonce" placeholder="Expected nonce if required">
           </div>
 
-          <button class="primary" onclick="verifyPresentation()" style="margin-top: 1rem;">Verify Presentation</button>
-
           <div class="output-section" id="verifierOutput" style="display: none;">
             <div class="output-label">Verified Claims (EDN)</div>
             <div class="edn-output" id="verifiedClaimsEdn"></div>
@@ -1250,8 +1224,7 @@
           </div>
 
           <div class="step-actions">
-            <button class="btn-secondary" onclick="goToStep(4)">← Back</button>
-            <button class="primary" onclick="resetWorkflow()">🔄 Start Over</button>
+            <button class="primary" onclick="verifyPresentationAndFinish()" id="step5Next">Verify Presentation</button>
           </div>
         </div>
       </div>
@@ -2152,7 +2125,7 @@
         const ednOutput = SDCWT.formatClaims(result.claims);
         document.getElementById('verifiedClaimsEdn').innerHTML = syntaxHighlightEdn(ednOutput);
         
-        showStatus('verifierStatus', 'Verification successful! ✓', 'success');
+        showStatus('verifierStatus', 'Verification successful!', 'success');
 
       } catch (error) {
         showStatus('verifierStatus', 'Verification failed: ' + error.message, 'error');
@@ -2357,27 +2330,15 @@
       }
     }
 
-    // Quick start: load spec keys and go directly to Issue step
+    // Initialize with spec keys pre-loaded
     function quickStart() {
-      try {
-        // Load holder spec key (this is synchronous)
-        loadSpecHolderKey();
-        
-        // Load issuer spec key (this is synchronous)
-        loadSpecIssuerKey();
-        
-        // Mark steps 1 and 2 as complete
-        stepCompleted[1] = true;
-        stepCompleted[2] = true;
-        
-        // Go directly to Issue step (step 3)
-        currentStep = 3;
-        updateStepUI();
-        
-        // Don't scroll - let user see the full page from the top
-      } catch (error) {
-        console.error('Quick start failed:', error);
-      }
+      // Pre-load spec keys so they're displayed
+      loadSpecHolderKey();
+      loadSpecIssuerKey();
+      
+      // Start at step 1
+      currentStep = 1;
+      updateStepUI();
     }
 
     function toggleStep(step) {
@@ -2432,20 +2393,14 @@
       issuedToken = null;
       disclosures = [];
       
-      document.getElementById('holderKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here in EDN format</span>';
+      document.getElementById('holderKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here after loading</span>';
       document.getElementById('holderPrivateKeyWarning').style.display = 'none';
-      document.getElementById('issuerKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here in EDN format</span>';
+      document.getElementById('issuerKeyEdnDisplay').innerHTML = '<span class="edn-placeholder">Key will be displayed here after loading</span>';
       document.getElementById('issuerPrivateKeyWarning').style.display = 'none';
       document.getElementById('issuerOutput').style.display = 'none';
       document.getElementById('holderOutput').style.display = 'none';
       document.getElementById('verifierOutput').style.display = 'none';
       document.getElementById('disclosureSelection').style.display = 'none';
-      
-      // Reset buttons
-      document.getElementById('step1Next').disabled = true;
-      document.getElementById('step2Next').disabled = true;
-      document.getElementById('step3Next').disabled = true;
-      document.getElementById('step4Next').disabled = true;
       
       updateStepUI();
       goToStep(1);
@@ -2494,6 +2449,52 @@
         document.getElementById('step4Next').disabled = false;
       }
     };
+
+    // ==========================================================================
+    // Key management functions (update key without auto-advancing)
+    // ==========================================================================
+    
+    async function generateHolderKeyOnly() {
+      await generateHolderKey();
+    }
+    
+    function loadHolderKeyFromHexOnly() {
+      loadHolderKeyFromHex();
+    }
+    
+    async function generateIssuerKeyOnly() {
+      await generateIssuerKey();
+    }
+    
+    function loadIssuerKeyFromHexOnly() {
+      loadIssuerKeyFromHex();
+    }
+    
+    async function issueCWTAndContinue() {
+      await issueCWT();
+      if (issuedToken) {
+        completeStep(3);
+      }
+    }
+    
+    async function createPresentationAndContinue() {
+      await createPresentation();
+      const presentationHex = document.getElementById('presentationHex').textContent;
+      if (presentationHex) {
+        // Copy presentation hex to verify step display
+        document.getElementById('presentedCwtHex').textContent = presentationHex;
+        completeStep(4);
+      }
+    }
+    
+    async function verifyPresentationAndFinish() {
+      await verifyPresentation();
+      const verifierOutput = document.getElementById('verifierOutput');
+      if (verifierOutput.style.display !== 'none') {
+        stepCompleted[5] = true;
+        updateStepUI();
+      }
+    }
 
     // ==========================================================================
     // Initialize

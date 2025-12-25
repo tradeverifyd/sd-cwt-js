@@ -55,6 +55,45 @@ const CWT_CLAIM_NAMES = {
   39: 'cnonce',
 };
 
+// COSE_Key parameter names (for cnf claim)
+const COSE_KEY_NAMES = {
+  1: 'kty',
+  2: 'kid',
+  3: 'alg',
+  4: 'key_ops',
+  5: 'Base IV',
+  [-1]: 'crv',
+  [-2]: 'x',
+  [-3]: 'y',
+  [-4]: 'd',
+};
+
+// Key type values
+const KTY_VALUES = {
+  1: 'OKP',
+  2: 'EC2',
+  3: 'RSA',
+  4: 'Symmetric',
+};
+
+// Curve values
+const CRV_VALUES = {
+  1: 'P-256',
+  2: 'P-384',
+  3: 'P-521',
+  4: 'X25519',
+  5: 'X448',
+  6: 'Ed25519',
+  7: 'Ed448',
+};
+
+// CNF claim inner keys
+const CNF_INNER_NAMES = {
+  1: 'COSE_Key',
+  2: 'Encrypted_COSE_Key',
+  3: 'kid',
+};
+
 /**
  * Get EDN comment for a CWT claim key
  * @param {number} key 
@@ -115,7 +154,7 @@ export const EDN = {
    * @returns {string}
    */
   formatClaims(claims) {
-    return formatMapWithComments(claims, 0, true);
+    return formatMapWithComments(claims, 0, 'claims');
   },
 };
 
@@ -207,9 +246,49 @@ function ednStringify(value, indent, depth) {
 }
 
 /**
- * Format a Map to EDN, optionally with CWT claim comments at top level
+ * Get comment for a key based on context
+ * @param {any} key - The map key
+ * @param {string} context - 'claims', 'cnf', 'cose_key', or null
+ * @returns {string} Comment prefix
  */
-function formatMapWithComments(map, depth, addComments = false) {
+function getKeyComment(key, context) {
+  if (typeof key !== 'number') return '';
+  
+  if (context === 'claims') {
+    const name = CWT_CLAIM_NAMES[key];
+    return name ? `/ ${name} / ` : '';
+  }
+  
+  if (context === 'cnf') {
+    const name = CNF_INNER_NAMES[key];
+    return name ? `/ ${name} / ` : '';
+  }
+  
+  if (context === 'cose_key') {
+    const name = COSE_KEY_NAMES[key];
+    if (name) {
+      // Add value hint for kty and crv
+      if (key === 1) {
+        return `/ ${name} / `;
+      }
+      if (key === -1) {
+        return `/ ${name} / `;
+      }
+      return `/ ${name} / `;
+    }
+    return '';
+  }
+  
+  return '';
+}
+
+/**
+ * Format a Map to EDN, optionally with CWT claim comments at top level
+ * @param {Map} map - The map to format
+ * @param {number} depth - Current indentation depth
+ * @param {string|null} context - 'claims', 'cnf', 'cose_key', or null
+ */
+function formatMapWithComments(map, depth, context = null) {
   if (!(map instanceof Map) || map.size === 0) {
     return '{}';
   }
@@ -220,18 +299,25 @@ function formatMapWithComments(map, depth, addComments = false) {
   
   for (const [key, value] of map) {
     let comment = '';
+    let valueContext = null;
     
     // Check for redaction tag first (works at any level)
     const redaction = getRedactionComment(key);
     if (redaction.isRedacted) {
       comment = redaction.comment;
-    } else if (addComments && typeof key === 'number') {
-      // Only add CWT claim comments at the top level
-      comment = getClaimComment(key);
+    } else if (context) {
+      comment = getKeyComment(key, context);
+      
+      // Determine context for nested values
+      if (context === 'claims' && key === 8) {
+        valueContext = 'cnf'; // cnf claim contains COSE_Key structure
+      } else if (context === 'cnf' && key === 1) {
+        valueContext = 'cose_key'; // cnf[1] is COSE_Key
+      }
     }
     
-    const keyStr = formatValueWithComments(key, depth + 1);
-    const valStr = formatValueWithComments(value, depth + 1);
+    const keyStr = formatValueWithComments(key, depth + 1, valueContext);
+    const valStr = formatValueWithComments(value, depth + 1, valueContext);
     entries.push(`${pad1}${comment}${keyStr}: ${valStr}`);
   }
   
@@ -240,8 +326,11 @@ function formatMapWithComments(map, depth, addComments = false) {
 
 /**
  * Stringify a value to EDN (internal helper for formatClaims)
+ * @param {any} value - The value to format
+ * @param {number} depth - Current indentation depth
+ * @param {string|null} context - Context for nested maps ('cnf', 'cose_key', etc)
  */
-function formatValueWithComments(value, depth) {
+function formatValueWithComments(value, depth, context = null) {
   const pad = '  '.repeat(depth);
   const pad1 = '  '.repeat(depth + 1);
 
@@ -269,7 +358,7 @@ function formatValueWithComments(value, depth) {
     if (value.tag === 60) {
       return 'null';
     }
-    const tagContent = formatValueWithComments(value.contents, depth);
+    const tagContent = formatValueWithComments(value.contents, depth, context);
     return `${value.tag}(${tagContent})`;
   }
 
@@ -278,13 +367,13 @@ function formatValueWithComments(value, depth) {
   }
 
   if (value instanceof Map) {
-    // Nested maps don't get comments
-    return formatMapWithComments(value, depth, false);
+    // Pass context to nested maps for cnf/COSE_Key comments
+    return formatMapWithComments(value, depth, context);
   }
 
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
-    const items = value.map(v => `${pad1}${formatValueWithComments(v, depth + 1)}`);
+    const items = value.map(v => `${pad1}${formatValueWithComments(v, depth + 1, context)}`);
     return `[\n${items.join(',\n')}\n${pad}]`;
   }
 
