@@ -204,10 +204,17 @@ export const Holder = {
       throw new Error('holderPrivateKey is REQUIRED to sign the SD-KBT');
     }
 
+    // Debug: Log token info at start
+    console.log('[Holder.present] token type:', token?.constructor?.name);
+    console.log('[Holder.present] token length:', token?.length);
+    console.log('[Holder.present] token instanceof Uint8Array:', token instanceof Uint8Array);
+
     // Ensure token is Uint8Array
     const tokenBytes = Buffer.isBuffer(token) 
       ? new Uint8Array(token.buffer, token.byteOffset, token.length)
       : (token instanceof Uint8Array ? token : new Uint8Array(token));
+    
+    console.log('[Holder.present] tokenBytes length:', tokenBytes?.length);
     
     // Ensure disclosures are Uint8Arrays
     const disclosureBytes = selectedDisclosures.map(d => 
@@ -298,6 +305,14 @@ function embedDisclosuresInToken(token, disclosures) {
   
   // COSE_Sign1: [protected, unprotected, payload, signature]
   const [protectedBytes, unprotectedMap, payload, signature] = coseArray;
+  
+  // Debug: Log signature info
+  console.log('[embedDisclosuresInToken] signature type:', signature?.constructor?.name);
+  console.log('[embedDisclosuresInToken] signature length:', signature?.length);
+  console.log('[embedDisclosuresInToken] signature instanceof Uint8Array:', signature instanceof Uint8Array);
+  if (signature && signature.length > 0) {
+    console.log('[embedDisclosuresInToken] first 5 bytes:', Array.from(signature.slice(0, 5)).map(b => b.toString(16).padStart(2, '0')).join(''));
+  }
   
   // Add disclosures to unprotected header
   const newUnprotected = unprotectedMap instanceof Map ? new Map(unprotectedMap) : new Map();

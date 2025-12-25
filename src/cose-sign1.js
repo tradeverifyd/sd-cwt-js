@@ -242,13 +242,20 @@ const HeaderLabels = {
 /**
  * Helper to convert Buffer or Uint8Array to pure Uint8Array
  * (Buffer extends Uint8Array but we need pure Uint8Array for crypto operations)
+ * Always creates a copy to avoid issues with views over shared buffers.
  */
 function toUint8Array(value) {
   if (Buffer.isBuffer(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.length);
+    // Create a copy to avoid issues with views over shared buffers
+    const copy = new Uint8Array(value.length);
+    copy.set(value);
+    return copy;
   }
   if (value instanceof Uint8Array) {
-    return value;
+    // Create a copy to avoid issues with views
+    const copy = new Uint8Array(value.length);
+    copy.set(value);
+    return copy;
   }
   return new Uint8Array(Buffer.from(value));
 }
@@ -256,10 +263,20 @@ function toUint8Array(value) {
 /**
  * Recursively converts Buffer values to Uint8Array in a value
  * (cbor2 encodes Buffer differently than Uint8Array)
+ * Always creates copies to avoid issues with views over shared buffers.
  */
 function convertBufferValues(value) {
   if (Buffer.isBuffer(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.length);
+    // Create a copy to avoid issues with views over shared buffers
+    const copy = new Uint8Array(value.length);
+    copy.set(value);
+    return copy;
+  }
+  if (value instanceof Uint8Array) {
+    // Create a copy to avoid issues with views
+    const copy = new Uint8Array(value.length);
+    copy.set(value);
+    return copy;
   }
   if (Array.isArray(value)) {
     return value.map(convertBufferValues);
@@ -271,7 +288,7 @@ function convertBufferValues(value) {
     }
     return result;
   }
-  if (value !== null && typeof value === 'object' && !(value instanceof Uint8Array)) {
+  if (value !== null && typeof value === 'object') {
     const result = {};
     for (const [k, v] of Object.entries(value)) {
       result[k] = convertBufferValues(v);

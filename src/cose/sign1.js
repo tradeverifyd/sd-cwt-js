@@ -62,6 +62,27 @@ const AlgInfo = {
 };
 
 /**
+ * Creates a copy of byte data to avoid issues with views over shared buffers
+ */
+function copyBytes(data) {
+  if (!data || data.length === 0) {
+    return data;
+  }
+  if (data instanceof Uint8Array) {
+    const copy = new Uint8Array(data.length);
+    copy.set(data);
+    return copy;
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const copy = new Uint8Array(view.length);
+    copy.set(view);
+    return copy;
+  }
+  return data;
+}
+
+/**
  * Creates the Sig_structure for signing/verification
  * 
  * Sig_structure = [
@@ -196,7 +217,12 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
     throw new Error('Invalid COSE_Sign1 structure');
   }
 
-  const [protectedBytes, , payload, signature] = structure;
+  const [protectedBytesRaw, , payloadRaw, signatureRaw] = structure;
+
+  // Create copies of byte arrays to avoid issues with views over shared buffers
+  const protectedBytes = copyBytes(protectedBytesRaw);
+  const payload = copyBytes(payloadRaw);
+  const signature = copyBytes(signatureRaw);
 
   // Decode protected header to get algorithm
   let protectedHeader = new Map();
@@ -246,7 +272,12 @@ export function decode(coseSign1) {
     throw new Error('Invalid COSE_Sign1 structure');
   }
 
-  const [protectedBytes, unprotectedHeader, payload, signature] = structure;
+  const [protectedBytesRaw, unprotectedHeader, payloadRaw, signatureRaw] = structure;
+  
+  // Create copies of byte arrays to avoid issues with views over shared buffers
+  const protectedBytes = copyBytes(protectedBytesRaw);
+  const payload = copyBytes(payloadRaw);
+  const signature = copyBytes(signatureRaw);
 
   // Decode protected header
   let protectedHeader = new Map();
@@ -293,6 +324,20 @@ async function signECDSA(data, key, algInfo) {
  * ECDSA verification using Node.js crypto
  */
 async function verifyECDSA(data, signature, key, algInfo) {
+  // Ensure we have a copy of the signature to avoid view issues
+  let sigBytes;
+  if (signature instanceof Uint8Array) {
+    sigBytes = new Uint8Array(signature.length);
+    sigBytes.set(signature);
+  } else if (ArrayBuffer.isView(signature)) {
+    sigBytes = new Uint8Array(signature.buffer, signature.byteOffset, signature.byteLength);
+    const copy = new Uint8Array(sigBytes.length);
+    copy.set(sigBytes);
+    sigBytes = copy;
+  } else {
+    sigBytes = new Uint8Array(Buffer.from(signature));
+  }
+  
   const jwk = {
     kty: 'EC',
     crv: algInfo.curve,
@@ -301,7 +346,7 @@ async function verifyECDSA(data, signature, key, algInfo) {
   };
 
   const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
-  const sigBuffer = signature instanceof Uint8Array ? Buffer.from(signature) : signature;
+  const sigBuffer = Buffer.from(sigBytes);
   
   return crypto.verify(null, data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuffer);
 }

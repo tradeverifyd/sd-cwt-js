@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SD-CWT Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0e14;
+      --bg-secondary: #111922;
+      --bg-tertiary: #1a2332;
+      --accent-cyan: #00d9ff;
+      --accent-magenta: #ff00aa;
+      --accent-yellow: #ffc800;
+      --accent-green: #00ff88;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #484f58;
+      --border-color: #30363d;
+      --error-red: #ff6b6b;
+      --glow-cyan: 0 0 20px rgba(0, 217, 255, 0.3);
+      --glow-magenta: 0 0 20px rgba(255, 0, 170, 0.3);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* Background pattern */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(ellipse at 20% 20%, rgba(0, 217, 255, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(255, 0, 170, 0.08) 0%, transparent 50%),
+        linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    header {
+      padding: 2rem 3rem;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(17, 25, 34, 0.8);
+      backdrop-filter: blur(10px);
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-magenta) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      display: inline-block;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      margin-top: 0.5rem;
+      font-weight: 300;
+    }
+
+    main {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 1200px) {
+      .workflow {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: var(--glow-cyan);
+    }
+
+    .card.issuer:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: var(--glow-cyan);
+    }
+
+    .card.holder:hover {
+      border-color: var(--accent-yellow);
+      box-shadow: 0 0 20px rgba(255, 200, 0, 0.3);
+    }
+
+    .card.verifier:hover {
+      border-color: var(--accent-green);
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+    }
+
+    .card-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .card-header .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+    }
+
+    .issuer .card-header .icon {
+      background: linear-gradient(135deg, var(--accent-cyan), #0088aa);
+    }
+
+    .holder .card-header .icon {
+      background: linear-gradient(135deg, var(--accent-yellow), #cc9900);
+    }
+
+    .verifier .card-header .icon {
+      background: linear-gradient(135deg, var(--accent-green), #00aa66);
+    }
+
+    .card-header h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .card-body {
+      padding: 1.5rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    textarea, input {
+      width: 100%;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      resize: vertical;
+      transition: all 0.2s ease;
+    }
+
+    textarea:focus, input:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.1);
+    }
+
+    textarea {
+      min-height: 120px;
+    }
+
+    textarea.tall {
+      min-height: 200px;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    button {
+      width: 100%;
+      padding: 0.875rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, var(--accent-cyan) 0%, #00aacc 100%);
+      color: var(--bg-primary);
+    }
+
+    button.primary:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--glow-cyan);
+    }
+
+    .issuer button.primary {
+      background: linear-gradient(135deg, var(--accent-cyan) 0%, #00aacc 100%);
+    }
+
+    .holder button.primary {
+      background: linear-gradient(135deg, var(--accent-yellow) 0%, #cc9900 100%);
+    }
+
+    .verifier button.primary {
+      background: linear-gradient(135deg, var(--accent-green) 0%, #00aa66 100%);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .output-section {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .output-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 0.75rem;
+    }
+
+    .hex-output {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      word-break: break-all;
+      color: var(--accent-cyan);
+      max-height: 200px;
+      overflow-y: auto;
+      user-select: all;
+    }
+
+    .edn-output {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      color: var(--text-primary);
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .edn-output .key {
+      color: var(--accent-magenta);
+    }
+
+    .edn-output .string {
+      color: var(--accent-green);
+    }
+
+    .edn-output .number {
+      color: var(--accent-yellow);
+    }
+
+    .edn-output .tag {
+      color: var(--accent-cyan);
+    }
+
+    .status {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-top: 1rem;
+    }
+
+    .status.success {
+      background: rgba(0, 255, 136, 0.1);
+      border: 1px solid var(--accent-green);
+      color: var(--accent-green);
+    }
+
+    .status.error {
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid var(--error-red);
+      color: var(--error-red);
+    }
+
+    .status.info {
+      background: rgba(0, 217, 255, 0.1);
+      border: 1px solid var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .disclosure-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .disclosure-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-tertiary);
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+
+    .disclosure-item input[type="checkbox"] {
+      width: auto;
+      accent-color: var(--accent-yellow);
+    }
+
+    .disclosure-item .key-name {
+      color: var(--accent-magenta);
+    }
+
+    .key-section {
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .key-section h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .key-section h3::before {
+      content: '🔑';
+      font-size: 0.9rem;
+    }
+
+    .small-btn {
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      width: auto;
+      display: inline-block;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 0.25rem 0.5rem;
+      font-size: 0.7rem;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .copy-btn:hover {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    .output-wrapper {
+      position: relative;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .tab.active {
+      background: var(--bg-primary);
+      color: var(--accent-cyan);
+      border-color: var(--accent-cyan);
+      border-bottom: 1px solid var(--bg-primary);
+      margin-bottom: -1px;
+    }
+
+    .tab:hover:not(.active) {
+      color: var(--text-primary);
+    }
+
+    .tab-content {
+      border: 1px solid var(--border-color);
+      border-radius: 0 8px 8px 8px;
+    }
+
+    .tab-content.active .tab:first-child {
+      border-radius: 0;
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--accent-cyan);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 0.5rem;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .arrow-divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: var(--text-muted);
+      padding: 0 0.5rem;
+    }
+
+    @media (max-width: 1200px) {
+      .arrow-divider {
+        transform: rotate(90deg);
+        padding: 1rem 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SD-CWT Playground</h1>
+    <p>Interactive testing for Selective Disclosure CBOR Web Tokens</p>
+  </header>
+
+  <main>
+    <div class="workflow">
+      <!-- Issuer Card -->
+      <div class="card issuer">
+        <div class="card-header">
+          <div class="icon">📋</div>
+          <h2>Issuer</h2>
+        </div>
+        <div class="card-body">
+          <div class="key-section">
+            <h3>Issuer Key Pair</h3>
+            <div class="btn-row">
+              <button class="small-btn primary" onclick="generateIssuerKey()">Generate New Key</button>
+            </div>
+            <div class="form-group" style="margin-top: 0.75rem;">
+              <input type="text" id="issuerKeyDisplay" readonly placeholder="No key generated" style="font-size: 0.75rem;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Claims (JSON with toBeRedacted markers)</label>
+            <textarea id="issuerClaims" class="tall" placeholder='{ "name": { "toBeRedacted": true, "value": "Alice" }, "age": 30 }'></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Holder Public Key (Hex - for cnf claim)</label>
+            <input type="text" id="holderPublicKeyForIssuer" placeholder="Holder's public key will appear here">
+          </div>
+
+          <button class="primary" onclick="issueCWT()">Issue SD-CWT</button>
+
+          <div class="output-section" id="issuerOutput" style="display: none;">
+            <div class="output-label">Issued SD-CWT (Hex)</div>
+            <div class="output-wrapper">
+              <div class="hex-output" id="issuedCwtHex"></div>
+              <button class="copy-btn" onclick="copyToClipboard('issuedCwtHex')">Copy</button>
+            </div>
+            <div id="issuerStatus"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Holder Card -->
+      <div class="card holder">
+        <div class="card-header">
+          <div class="icon">👤</div>
+          <h2>Holder</h2>
+        </div>
+        <div class="card-body">
+          <div class="key-section">
+            <h3>Holder Key Pair</h3>
+            <div class="btn-row">
+              <button class="small-btn primary" onclick="generateHolderKey()">Generate New Key</button>
+            </div>
+            <div class="form-group" style="margin-top: 0.75rem;">
+              <input type="text" id="holderKeyDisplay" readonly placeholder="No key generated" style="font-size: 0.75rem;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>SD-CWT to Present (Hex)</label>
+            <textarea id="holderCwt" placeholder="Paste the issued SD-CWT hex here"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Audience</label>
+            <input type="text" id="holderAudience" placeholder="https://verifier.example.com">
+          </div>
+
+          <div class="form-group">
+            <label>Nonce (optional)</label>
+            <input type="text" id="holderNonce" placeholder="Random nonce for replay protection">
+          </div>
+
+          <div class="form-group" id="disclosureSelection" style="display: none;">
+            <label>Select Disclosures</label>
+            <div class="disclosure-list" id="disclosureList"></div>
+          </div>
+
+          <button class="primary" onclick="createPresentation()">Create Presentation</button>
+
+          <div class="output-section" id="holderOutput" style="display: none;">
+            <div class="output-label">Presentation (SD-KBT Hex)</div>
+            <div class="output-wrapper">
+              <div class="hex-output" id="presentationHex"></div>
+              <button class="copy-btn" onclick="copyToClipboard('presentationHex')">Copy</button>
+            </div>
+            <div id="holderStatus"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verifier Card -->
+      <div class="card verifier">
+        <div class="card-header">
+          <div class="icon">✓</div>
+          <h2>Verifier</h2>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Presentation (SD-KBT Hex)</label>
+            <textarea id="verifierPresentation" placeholder="Paste the presentation hex here"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Issuer Public Key (Hex)</label>
+            <input type="text" id="issuerPublicKeyForVerifier" placeholder="Issuer's public key">
+          </div>
+
+          <div class="form-group">
+            <label>Expected Audience</label>
+            <input type="text" id="verifierAudience" placeholder="https://verifier.example.com">
+          </div>
+
+          <div class="form-group">
+            <label>Expected Nonce (optional)</label>
+            <input type="text" id="verifierNonce" placeholder="Expected nonce if required">
+          </div>
+
+          <button class="primary" onclick="verifyPresentation()">Verify</button>
+
+          <div class="output-section" id="verifierOutput" style="display: none;">
+            <div class="tabs">
+              <div class="tab active" onclick="switchTab('claims')">Verified Claims</div>
+              <div class="tab" onclick="switchTab('raw')">Raw EDN</div>
+            </div>
+            <div class="tab-content">
+              <div class="edn-output" id="verifiedClaimsEdn"></div>
+            </div>
+            <div id="verifierStatus"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>
+      SD-CWT Implementation • 
+      <a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-sd-cwt/" target="_blank">Specification</a> •
+      Built with Web Crypto API
+    </p>
+  </footer>
+
+  <script src="js/sd-cwt.js"></script>
+  <script>
+    // State
+    let issuerKeyPair = null;
+    let holderKeyPair = null;
+    let issuedToken = null;
+    let disclosures = [];
+    let currentTabView = 'claims';
+
+    // Initialize with sample data
+    document.getElementById('issuerClaims').value = JSON.stringify({
+      "sub": "user_123",
+      "name": { "toBeRedacted": true, "value": "Alice Smith" },
+      "email": { "toBeRedacted": true, "value": "alice@example.com" },
+      "birthdate": { "toBeRedacted": true, "value": "1990-01-15" },
+      "verified": true,
+      "roles": ["user", { "toBeRedacted": true, "value": "admin" }]
+    }, null, 2);
+
+    document.getElementById('holderAudience').value = 'https://verifier.example.com';
+    document.getElementById('verifierAudience').value = 'https://verifier.example.com';
+
+    // Key generation
+    async function generateIssuerKey() {
+      try {
+        issuerKeyPair = await generateKeyPair();
+        document.getElementById('issuerKeyDisplay').value = 
+          `Public: ${SDCWT.Hex.encode(issuerKeyPair.publicKey.x).slice(0, 16)}...`;
+        document.getElementById('issuerPublicKeyForVerifier').value = 
+          serializePublicKey(issuerKeyPair.publicKey);
+        showStatus('issuerStatus', 'Issuer key pair generated', 'success');
+      } catch (error) {
+        showStatus('issuerStatus', 'Key generation failed: ' + error.message, 'error');
+      }
+    }
+
+    async function generateHolderKey() {
+      try {
+        holderKeyPair = await generateKeyPair();
+        document.getElementById('holderKeyDisplay').value = 
+          `Public: ${SDCWT.Hex.encode(holderKeyPair.publicKey.x).slice(0, 16)}...`;
+        document.getElementById('holderPublicKeyForIssuer').value = 
+          serializePublicKey(holderKeyPair.publicKey);
+        showStatus('holderStatus', 'Holder key pair generated', 'success');
+      } catch (error) {
+        showStatus('holderStatus', 'Key generation failed: ' + error.message, 'error');
+      }
+    }
+
+    async function generateKeyPair() {
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign', 'verify']
+      );
+
+      const privateJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+      const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+
+      return {
+        privateKey: {
+          d: base64urlDecode(privateJwk.d),
+          x: base64urlDecode(privateJwk.x),
+          y: base64urlDecode(privateJwk.y),
+        },
+        publicKey: {
+          x: base64urlDecode(publicJwk.x),
+          y: base64urlDecode(publicJwk.y),
+        },
+      };
+    }
+
+    function base64urlDecode(str) {
+      const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = base64.length % 4;
+      const padded = pad ? base64 + '='.repeat(4 - pad) : base64;
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    function serializePublicKey(publicKey) {
+      const x = SDCWT.Hex.encode(publicKey.x);
+      const y = SDCWT.Hex.encode(publicKey.y);
+      return x + y;
+    }
+
+    function deserializePublicKey(hex) {
+      const bytes = SDCWT.Hex.decode(hex);
+      const keySize = bytes.length / 2;
+      return {
+        x: bytes.slice(0, keySize),
+        y: bytes.slice(keySize),
+      };
+    }
+
+    // Claims transformation
+    function transformClaimsForIssue(claims, holderPublicKey) {
+      const result = new Map();
+      
+      // Add standard claims
+      result.set(6, Math.floor(Date.now() / 1000)); // iat
+      result.set(4, Math.floor(Date.now() / 1000) + 3600); // exp (1 hour)
+      
+      // Add confirmation claim with holder's public key
+      const cnf = new Map();
+      const coseKey = new Map();
+      coseKey.set(1, 2);  // kty: EC2
+      coseKey.set(-1, 1); // crv: P-256
+      coseKey.set(-2, holderPublicKey.x); // x
+      coseKey.set(-3, holderPublicKey.y); // y
+      cnf.set(1, coseKey); // COSE_Key
+      result.set(8, cnf);  // cnf claim
+
+      // Process user claims
+      for (const [key, value] of Object.entries(claims)) {
+        const claimKey = isNaN(key) ? key : parseInt(key);
+        result.set(claimKey, transformValue(value));
+      }
+
+      return result;
+    }
+
+    function transformValue(value) {
+      if (value === null || value === undefined) {
+        return value;
+      }
+
+      if (typeof value === 'object' && value.toBeRedacted === true) {
+        // Wrap in ToBeRedacted tag (58)
+        return new SDCWT.cbor.Tag(58, value.value);
+      }
+
+      if (Array.isArray(value)) {
+        return value.map(transformValue);
+      }
+
+      if (typeof value === 'object') {
+        const map = new Map();
+        for (const [k, v] of Object.entries(value)) {
+          map.set(k, transformValue(v));
+        }
+        return map;
+      }
+
+      return value;
+    }
+
+    // Issue SD-CWT
+    async function issueCWT() {
+      try {
+        if (!issuerKeyPair) {
+          throw new Error('Please generate an issuer key first');
+        }
+
+        const holderPubHex = document.getElementById('holderPublicKeyForIssuer').value;
+        if (!holderPubHex) {
+          throw new Error('Please provide holder public key (generate holder key first)');
+        }
+
+        const claimsJson = document.getElementById('issuerClaims').value;
+        const userClaims = JSON.parse(claimsJson);
+        
+        const holderPublicKey = deserializePublicKey(holderPubHex);
+        const claims = transformClaimsForIssue(userClaims, holderPublicKey);
+
+        // Issue the SD-CWT
+        const result = await SDCWT.Issuer.issue({
+          claims,
+          privateKey: issuerKeyPair.privateKey,
+          algorithm: 'ES256',
+        });
+
+        issuedToken = result.token;
+        disclosures = result.disclosures;
+
+        // Display result
+        document.getElementById('issuerOutput').style.display = 'block';
+        document.getElementById('issuedCwtHex').textContent = SDCWT.Hex.encode(result.token);
+        
+        showStatus('issuerStatus', 
+          `Issued successfully! ${disclosures.length} disclosure(s) generated.`, 'success');
+
+        // Auto-fill holder input
+        document.getElementById('holderCwt').value = SDCWT.Hex.encode(result.token);
+        updateDisclosureList();
+
+      } catch (error) {
+        showStatus('issuerStatus', 'Issue failed: ' + error.message, 'error');
+        console.error(error);
+      }
+    }
+
+    // Update disclosure list in holder section
+    function updateDisclosureList() {
+      const container = document.getElementById('disclosureList');
+      container.innerHTML = '';
+
+      if (disclosures.length === 0) {
+        document.getElementById('disclosureSelection').style.display = 'none';
+        return;
+      }
+
+      document.getElementById('disclosureSelection').style.display = 'block';
+
+      disclosures.forEach((disclosure, index) => {
+        const decoded = SDCWT.cbor.decode(disclosure);
+        const [salt, key, value] = decoded;
+
+        const item = document.createElement('div');
+        item.className = 'disclosure-item';
+        item.innerHTML = `
+          <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+          <span class="key-name">${key}</span>: ${formatValuePreview(value)}
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function formatValuePreview(value) {
+      if (typeof value === 'string') {
+        return value.length > 30 ? `"${value.slice(0, 30)}..."` : `"${value}"`;
+      }
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+      }
+      if (Array.isArray(value)) {
+        return `[array, ${value.length} items]`;
+      }
+      if (value instanceof Map) {
+        return `{map, ${value.size} entries}`;
+      }
+      return String(value);
+    }
+
+    // Create presentation
+    async function createPresentation() {
+      try {
+        if (!holderKeyPair) {
+          throw new Error('Please generate a holder key first');
+        }
+
+        const cwtHex = document.getElementById('holderCwt').value;
+        if (!cwtHex) {
+          throw new Error('Please provide an SD-CWT');
+        }
+
+        const audience = document.getElementById('holderAudience').value;
+        if (!audience) {
+          throw new Error('Audience is required');
+        }
+
+        const nonce = document.getElementById('holderNonce').value || undefined;
+        const token = SDCWT.Hex.decode(cwtHex);
+
+        // Get selected disclosures
+        const selectedDisclosures = [];
+        const checkboxes = document.querySelectorAll('#disclosureList input[type="checkbox"]');
+        checkboxes.forEach((cb, index) => {
+          if (cb.checked && disclosures[index]) {
+            selectedDisclosures.push(disclosures[index]);
+          }
+        });
+
+        // Create presentation
+        const presentation = await SDCWT.Holder.present({
+          token,
+          selectedDisclosures,
+          holderPrivateKey: holderKeyPair.privateKey,
+          audience,
+          nonce,
+          algorithm: 'ES256',
+        });
+
+        // Display result
+        document.getElementById('holderOutput').style.display = 'block';
+        document.getElementById('presentationHex').textContent = SDCWT.Hex.encode(presentation);
+        
+        showStatus('holderStatus', 
+          `Presentation created with ${selectedDisclosures.length} disclosure(s)`, 'success');
+
+        // Auto-fill verifier input
+        document.getElementById('verifierPresentation').value = SDCWT.Hex.encode(presentation);
+
+      } catch (error) {
+        showStatus('holderStatus', 'Presentation failed: ' + error.message, 'error');
+        console.error(error);
+      }
+    }
+
+    // Verify presentation
+    async function verifyPresentation() {
+      try {
+        const presentationHex = document.getElementById('verifierPresentation').value;
+        if (!presentationHex) {
+          throw new Error('Please provide a presentation');
+        }
+
+        const issuerPubHex = document.getElementById('issuerPublicKeyForVerifier').value;
+        if (!issuerPubHex) {
+          throw new Error('Please provide issuer public key');
+        }
+
+        const expectedAudience = document.getElementById('verifierAudience').value;
+        if (!expectedAudience) {
+          throw new Error('Expected audience is required');
+        }
+
+        const expectedNonce = document.getElementById('verifierNonce').value || undefined;
+        
+        const presentation = SDCWT.Hex.decode(presentationHex);
+        const issuerPublicKey = deserializePublicKey(issuerPubHex);
+
+        // Verify
+        const result = await SDCWT.Verifier.verify({
+          presentation,
+          issuerPublicKey,
+          expectedAudience,
+          expectedNonce,
+          hashAlgorithm: 'sha-256',
+        });
+
+        // Display result
+        document.getElementById('verifierOutput').style.display = 'block';
+        
+        const ednOutput = SDCWT.formatClaims(result.claims);
+        document.getElementById('verifiedClaimsEdn').innerHTML = syntaxHighlightEdn(ednOutput);
+        
+        showStatus('verifierStatus', 'Verification successful! ✓', 'success');
+
+      } catch (error) {
+        showStatus('verifierStatus', 'Verification failed: ' + error.message, 'error');
+        document.getElementById('verifierOutput').style.display = 'block';
+        document.getElementById('verifiedClaimsEdn').innerHTML = 
+          `<span style="color: var(--error-red);">Error: ${error.message}</span>`;
+        console.error(error);
+      }
+    }
+
+    // Syntax highlighting for EDN
+    function syntaxHighlightEdn(edn) {
+      return edn
+        .replace(/(\/\s*\w+\s*\/\s*\d+):/g, '<span class="key">$1</span>:')
+        .replace(/("(?:[^"\\]|\\.)*")/g, '<span class="string">$1</span>')
+        .replace(/\b(\d+)\b(?!:)/g, '<span class="number">$1</span>')
+        .replace(/(\d+)\(/g, '<span class="tag">$1</span>(')
+        .replace(/(h'[0-9a-fA-F]+')/g, '<span class="tag">$1</span>');
+    }
+
+    // Tab switching
+    function switchTab(tab) {
+      currentTabView = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    // Utility functions
+    function showStatus(elementId, message, type) {
+      const el = document.getElementById(elementId);
+      el.className = 'status ' + type;
+      el.textContent = message;
+      el.style.display = 'block';
+    }
+
+    function copyToClipboard(elementId) {
+      const text = document.getElementById(elementId).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback
+        const btn = document.querySelector(`#${elementId}`).parentElement.querySelector('.copy-btn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = originalText, 1500);
+      });
+    }
+
+    // Auto-generate keys on load
+    Promise.all([generateIssuerKey(), generateHolderKey()]).then(() => {
+      console.log('Keys generated');
+    });
+  </script>
+</body>
+</html>
+
