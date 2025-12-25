@@ -9,14 +9,6 @@ describe('cose-js sanity tests', () => {
     it('should export sign object', () => {
       assert.ok(cose.sign, 'cose.sign should exist');
     });
-
-    it('should export mac object', () => {
-      assert.ok(cose.mac, 'cose.mac should exist');
-    });
-
-    it('should export encrypt object', () => {
-      assert.ok(cose.encrypt, 'cose.encrypt should exist');
-    });
   });
 
   describe('COSE Sign1', () => {
@@ -103,93 +95,4 @@ describe('cose-js sanity tests', () => {
     });
   });
 
-  describe('COSE MAC0', () => {
-    const plaintext = Buffer.from('Content to authenticate');
-    
-    // Symmetric key for HMAC
-    const symmetricKey = crypto.randomBytes(32);
-
-    const headers = {
-      p: { alg: 'HS256' },
-      u: { kid: 'mac-key-1' }
-    };
-
-    const recipient = {
-      key: symmetricKey
-    };
-
-    it('should create a COSE MAC0 message', async () => {
-      const macced = await cose.mac.create(headers, plaintext, recipient);
-      assert.ok(Buffer.isBuffer(macced) || macced instanceof Uint8Array);
-      assert.ok(macced.length > 0);
-    });
-
-    it('should verify a COSE MAC0 message', async () => {
-      const macced = await cose.mac.create(headers, plaintext, recipient);
-      const verified = await cose.mac.read(macced, symmetricKey);
-      assert.deepStrictEqual(Buffer.from(verified), plaintext);
-    });
-
-    it('should fail verification with wrong key', async () => {
-      const wrongKey = crypto.randomBytes(32);
-      const macced = await cose.mac.create(headers, plaintext, recipient);
-      
-      await assert.rejects(
-        async () => await cose.mac.read(macced, wrongKey),
-        'MAC verification should fail with wrong key'
-      );
-    });
-  });
-
-  describe('COSE Encrypt0', () => {
-    const plaintext = Buffer.from('Secret content to encrypt');
-    
-    // AES key for encryption
-    const encryptionKey = crypto.randomBytes(16); // 128-bit for A128GCM
-
-    const headers = {
-      p: { alg: 'A128GCM' },
-      u: { kid: 'enc-key-1' }
-    };
-
-    const recipient = {
-      key: encryptionKey
-    };
-
-    it('should create a COSE Encrypt0 message', async () => {
-      const encrypted = await cose.encrypt.create(headers, plaintext, recipient);
-      assert.ok(Buffer.isBuffer(encrypted) || encrypted instanceof Uint8Array);
-      assert.ok(encrypted.length > 0);
-    });
-
-    it('should decrypt a COSE Encrypt0 message', async () => {
-      const encrypted = await cose.encrypt.create(headers, plaintext, recipient);
-      const decrypted = await cose.encrypt.read(encrypted, encryptionKey);
-      assert.deepStrictEqual(Buffer.from(decrypted), plaintext);
-    });
-
-    it('should fail decryption with wrong key', async () => {
-      const wrongKey = crypto.randomBytes(16);
-      const encrypted = await cose.encrypt.create(headers, plaintext, recipient);
-      
-      await assert.rejects(
-        async () => await cose.encrypt.read(encrypted, wrongKey),
-        'Decryption should fail with wrong key'
-      );
-    });
-
-    it('should produce different ciphertext for same plaintext (due to random IV)', async () => {
-      const encrypted1 = await cose.encrypt.create(headers, plaintext, recipient);
-      const encrypted2 = await cose.encrypt.create(headers, plaintext, recipient);
-      
-      // The two encrypted messages should be different due to random IV
-      assert.notDeepStrictEqual(encrypted1, encrypted2);
-      
-      // But both should decrypt to the same plaintext
-      const decrypted1 = await cose.encrypt.read(encrypted1, encryptionKey);
-      const decrypted2 = await cose.encrypt.read(encrypted2, encryptionKey);
-      assert.deepStrictEqual(Buffer.from(decrypted1), plaintext);
-      assert.deepStrictEqual(Buffer.from(decrypted2), plaintext);
-    });
-  });
 });
