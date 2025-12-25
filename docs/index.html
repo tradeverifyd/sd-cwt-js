@@ -85,9 +85,12 @@
     }
 
     header {
-      padding: 2.5rem 3rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 1.5rem 3rem;
       border-bottom: 1px solid var(--border-subtle);
-      background: rgba(5, 5, 6, 0.9);
+      background: rgba(5, 5, 6, 0.95);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
     }
@@ -95,13 +98,32 @@
     .header-content {
       max-width: 900px;
       margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2rem;
+    }
+
+    .header-left {
+      flex: 1;
+    }
+
+    .header-cta {
+      flex-shrink: 0;
+    }
+
+    .header-cta button.primary {
+      padding: 0.75rem 1.5rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      min-width: 100px;
     }
 
     .brand-mark {
       display: flex;
       align-items: center;
       gap: 1.5rem;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.25rem;
     }
 
     .brand-mark .logo-full {
@@ -968,13 +990,18 @@
 <body>
   <header>
     <div class="header-content">
-      <div class="brand-mark">
-        <!-- Tradeverifyd Full Logo -->
-        <img src="tradeverifyd-logo.svg" alt="Tradeverifyd" class="logo-full">
-        <div class="divider"></div>
-        <div class="product-name">SD-CWT <span>Sandbox</span></div>
+      <div class="header-left">
+        <div class="brand-mark">
+          <!-- Tradeverifyd Full Logo -->
+          <img src="tradeverifyd-logo.svg" alt="Tradeverifyd" class="logo-full">
+          <div class="divider"></div>
+          <div class="product-name">SD-CWT <span>Sandbox</span></div>
+        </div>
+        <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank">spec</a> examples</p>
       </div>
-      <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank">spec</a> examples</p>
+      <div class="header-cta">
+        <button id="headerCta" class="primary" onclick="advanceWorkflow()">Issue</button>
+      </div>
     </div>
   </header>
 
@@ -1044,9 +1071,6 @@
               <div id="holderKeyImportStatus"></div>
             </div>
           </details>
-          <div class="step-actions">
-            <button class="primary" onclick="completeStep(1)" id="step1Next">Continue</button>
-          </div>
         </div>
       </div>
 
@@ -1086,9 +1110,6 @@
               <div id="issuerKeyImportStatus"></div>
             </div>
           </details>
-          <div class="step-actions">
-            <button class="primary" onclick="completeStep(2)" id="step2Next">Continue</button>
-          </div>
         </div>
       </div>
 
@@ -1126,9 +1147,6 @@
             <div id="issuerStatus"></div>
           </div>
 
-          <div class="step-actions">
-            <button class="primary" onclick="issueCWTAndContinue()" id="step3Next">Issue</button>
-          </div>
         </div>
       </div>
 
@@ -1163,6 +1181,10 @@
           <div class="form-group" id="disclosureSelection" style="display: none;">
             <label>Select Disclosures</label>
             <div class="disclosure-list" id="disclosureList"></div>
+            <div class="output-section" id="disclosurePreviewSection" style="margin-top: 1rem;">
+              <div class="output-label">Claims to be Verified (Preview)</div>
+              <div class="edn-output" id="disclosurePreview" style="min-height: 80px;"></div>
+            </div>
           </div>
 
           <div class="output-section" id="holderOutput" style="display: none;">
@@ -1174,9 +1196,6 @@
             <div id="holderStatus"></div>
           </div>
 
-          <div class="step-actions">
-            <button class="primary" onclick="createPresentationAndContinue()" id="step4Next">Present</button>
-          </div>
         </div>
       </div>
 
@@ -1223,9 +1242,6 @@
             <div id="verifierStatus"></div>
           </div>
 
-          <div class="step-actions">
-            <button class="primary" onclick="verifyPresentationAndFinish()" id="step5Next">Verify</button>
-          </div>
         </div>
       </div>
     </div>
@@ -1234,7 +1250,7 @@
   <footer>
     <p>
       <strong>SD-CWT Implementation</strong> by Tradeverifyd • 
-      <a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-sd-cwt/" target="_blank">Specification</a> •
+      <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank">Specification</a> •
       Built with Web Crypto API
     </p>
   </footer>
@@ -1878,7 +1894,7 @@
         if (claimKey !== null) {
           // Named claim: display as key : value (salt: ...)
           item.innerHTML = `
-            <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+            <input type="checkbox" id="disclosure_${index}" data-index="${index}" onchange="updateDisclosurePreview()">
             <span class="disclosure-key">${formatKeyPreview(claimKey)}</span>
             <span class="disclosure-sep">:</span>
             <span class="disclosure-value">${formatValuePreview(claimValue)}</span>
@@ -1890,7 +1906,7 @@
           const parentLabel = arrayParent ? `<span class="disclosure-array-parent">${arrayParent}[]</span>` : '';
           
           item.innerHTML = `
-            <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+            <input type="checkbox" id="disclosure_${index}" data-index="${index}" onchange="updateDisclosurePreview()">
             ${parentLabel}
             <span class="disclosure-value">${formatValuePreview(claimValue)}</span>
             <span class="disclosure-salt" title="${saltHex}">(salt: ${saltDisplay})</span>
@@ -1906,11 +1922,61 @@
           item.className = 'disclosure-item decoy-item';
           item.innerHTML = `
             <span class="decoy-icon">🎭</span>
-            <span class="decoy-label">Decoy digest #${i + 1}</span>
-            <span class="decoy-hint">(hides redaction count per §10)</span>
+            <span class="decoy-label">Decoy #${i + 1}</span>
           `;
           container.appendChild(item);
         }
+      }
+      
+      // Update the preview with no disclosures selected by default
+      updateDisclosurePreview();
+    }
+    
+    // Update the "to be verified" claims preview based on selected disclosures
+    async function updateDisclosurePreview() {
+      const previewEl = document.getElementById('disclosurePreview');
+      if (!previewEl) return;
+      
+      if (!issuedToken || disclosures.length === 0) {
+        previewEl.innerHTML = '<span class="edn-placeholder">Issue a token first</span>';
+        return;
+      }
+      
+      try {
+        // Get selected disclosures
+        const selectedDisclosures = [];
+        const checkboxes = document.querySelectorAll('#disclosureList input[type="checkbox"]');
+        checkboxes.forEach((cb, index) => {
+          if (cb.checked && disclosures[index]) {
+            selectedDisclosures.push(disclosures[index]);
+          }
+        });
+        
+        // Create a presentation with selected disclosures
+        const audience = document.getElementById('holderAudience').value || 'https://verifier.example';
+        const presentation = await SDCWT.Holder.present({
+          token: issuedToken,
+          selectedDisclosures,
+          holderPrivateKey: holderKeyPair.privateKey,
+          audience,
+          algorithm: holderAlgorithm,
+        });
+        
+        // Verify the presentation to get the claims
+        const result = await SDCWT.Verifier.verify({
+          presentation,
+          issuerPublicKey: issuerKeyPair.publicKey,
+          expectedAudience: audience,
+          hashAlgorithm: 'sha-256',
+        });
+        
+        // Format and display the verified claims
+        const formatted = SDCWT.formatClaims(result.claims);
+        previewEl.innerHTML = syntaxHighlightEdn(formatted);
+        
+      } catch (error) {
+        previewEl.innerHTML = `<span class="edn-placeholder">Preview: ${error.message}</span>`;
+        console.error('Disclosure preview error:', error);
       }
     }
     
@@ -2310,6 +2376,9 @@
           }
         }
       }
+      
+      // Update header CTA button
+      updateHeaderCta();
     }
 
     function canAccessStep(step) {
@@ -2330,15 +2399,55 @@
       }
     }
 
-    // Initialize with spec keys pre-loaded
+    // Initialize with spec keys pre-loaded and go to Issue step
     function quickStart() {
       // Pre-load spec keys so they're displayed
       loadSpecHolderKey();
       loadSpecIssuerKey();
       
-      // Start at step 1
-      currentStep = 1;
+      // Mark steps 1 and 2 as complete, go to step 3 (Issue)
+      stepCompleted[1] = true;
+      stepCompleted[2] = true;
+      currentStep = 3;
       updateStepUI();
+      updateHeaderCta();
+    }
+
+    // Advance to the next step based on current step
+    function advanceWorkflow() {
+      switch (currentStep) {
+        case 1:
+          completeStep(1);
+          break;
+        case 2:
+          completeStep(2);
+          break;
+        case 3:
+          issueCWTAndContinue();
+          break;
+        case 4:
+          createPresentationAndContinue();
+          break;
+        case 5:
+          verifyPresentationAndFinish();
+          break;
+      }
+    }
+
+    // Update the header CTA button text based on current step
+    function updateHeaderCta() {
+      const btn = document.getElementById('headerCta');
+      if (!btn) return;
+      
+      const labels = {
+        1: 'Continue',
+        2: 'Continue',
+        3: 'Issue',
+        4: 'Present',
+        5: 'Verify'
+      };
+      
+      btn.textContent = labels[currentStep] || 'Continue';
     }
 
     function toggleStep(step) {
@@ -2406,49 +2515,6 @@
       goToStep(1);
     }
 
-    // Update key loading functions to enable step progression
-    const originalLoadSpecHolderKey = loadSpecHolderKey;
-    loadSpecHolderKey = function() {
-      originalLoadSpecHolderKey();
-      document.getElementById('step1Next').disabled = false;
-    };
-
-    const originalGenerateHolderKey = generateHolderKey;
-    generateHolderKey = async function() {
-      await originalGenerateHolderKey();
-      document.getElementById('step1Next').disabled = false;
-    };
-
-    const originalLoadSpecIssuerKey = loadSpecIssuerKey;
-    loadSpecIssuerKey = function() {
-      originalLoadSpecIssuerKey();
-      document.getElementById('step2Next').disabled = false;
-    };
-
-    const originalGenerateIssuerKey = generateIssuerKey;
-    generateIssuerKey = async function() {
-      await originalGenerateIssuerKey();
-      document.getElementById('step2Next').disabled = false;
-    };
-
-    // Update issueCWT to enable step progression
-    const originalIssueCWT = issueCWT;
-    issueCWT = async function() {
-      await originalIssueCWT();
-      if (issuedToken) {
-        document.getElementById('step3Next').disabled = false;
-      }
-    };
-
-    // Update createPresentation to enable step progression
-    const originalCreatePresentation = createPresentation;
-    createPresentation = async function() {
-      await originalCreatePresentation();
-      const presentationHex = document.getElementById('presentationHex').textContent;
-      if (presentationHex) {
-        document.getElementById('step4Next').disabled = false;
-      }
-    };
 
     // ==========================================================================
     // Key management functions (update key without auto-advancing)
