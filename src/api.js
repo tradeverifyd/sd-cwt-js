@@ -16,7 +16,7 @@ import * as coseSign1 from './cose-sign1.js';
 import * as sdCwt from './sd-cwt.js';
 
 // Re-export key utilities
-export { toBeRedacted, toBeDecoy } from './sd-cwt.js';
+export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean } from './sd-cwt.js';
 export { generateKeyPair, Algorithm } from './cose-sign1.js';
 
 /**
@@ -40,6 +40,7 @@ export const Issuer = {
    * @param {string} [options.algorithm='ES256'] - Signing algorithm
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm for redactions
    * @param {string|Buffer} [options.kid] - Key identifier
+   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
    * @returns {Promise<{token: Buffer, disclosures: Uint8Array[]}>} The signed SD-CWT and disclosures
    * 
    * @example
@@ -54,13 +55,13 @@ export const Issuer = {
    *   privateKey: issuerKey.privateKey,
    * });
    */
-  async issue({ claims, privateKey, algorithm = 'ES256', hashAlgorithm = 'sha256', kid }) {
+  async issue({ claims, privateKey, algorithm = 'ES256', hashAlgorithm = 'sha256', kid, strict = false }) {
     if (!(claims instanceof Map)) {
       throw new Error('Claims must be a Map');
     }
 
     // Process claims to handle toBeRedacted and toBeDecoy tags
-    const { claims: processedClaims, disclosures } = sdCwt.processToBeRedacted(claims, hashAlgorithm);
+    const { claims: processedClaims, disclosures } = sdCwt.processToBeRedacted(claims, { hashAlg: hashAlgorithm, strict });
 
     // Encode claims as CBOR payload
     const payload = cbor.encode(processedClaims);
@@ -256,6 +257,8 @@ export const Verifier = {
    * @param {Buffer|Uint8Array} options.presentation - The presentation (CBOR: [token, disclosures])
    * @param {Object} options.publicKey - Issuer's public key {x, y}
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
+   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
+   * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
    * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
    * @throws {Error} If signature verification fails or disclosures are invalid
    * 
@@ -266,7 +269,7 @@ export const Verifier = {
    * });
    * console.log(result.claims); // Reconstructed claims Map
    */
-  async verify({ presentation, publicKey, hashAlgorithm = 'sha256' }) {
+  async verify({ presentation, publicKey, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
     // Decode the presentation
     const decoded = cbor.decode(presentation, sdCwt.cborDecodeOptions);
     
@@ -284,7 +287,7 @@ export const Verifier = {
     const token = tokenBytes instanceof Uint8Array ? tokenBytes : new Uint8Array(tokenBytes);
 
     // Verify the token and get the payload
-    return this.verifyToken({ token, disclosures, publicKey, hashAlgorithm });
+    return this.verifyToken({ token, disclosures, publicKey, hashAlgorithm, strict, requireClean });
   },
 
   /**
@@ -295,9 +298,11 @@ export const Verifier = {
    * @param {Uint8Array[]} options.disclosures - Disclosures to apply
    * @param {Object} options.publicKey - Issuer's public key {x, y}
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
+   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
+   * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
    * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
    */
-  async verifyToken({ token, disclosures, publicKey, hashAlgorithm = 'sha256' }) {
+  async verifyToken({ token, disclosures, publicKey, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
     // Verify the COSE signature
     const payloadBytes = await coseSign1.verify(token, publicKey);
 
@@ -311,8 +316,17 @@ export const Verifier = {
     const { claims, redactedKeys } = sdCwt.reconstructClaims(
       redactedClaims, 
       validatedDisclosures, 
-      hashAlgorithm
+      { hashAlg: hashAlgorithm, strict }
     );
+
+    // Optionally verify that claims are clean (no remaining SD-CWT artifacts)
+    if (requireClean) {
+      sdCwt.assertClaimsClean(claims, { strict });
+      // Also check that there are no remaining undisclosed claims
+      if (redactedKeys.length > 0) {
+        throw new Error(`Claims contain SD-CWT artifacts:\n${redactedKeys.length} undisclosed redacted key(s) remain`);
+      }
+    }
 
     // Get headers for metadata
     const { protectedHeaders, unprotectedHeaders } = coseSign1.getHeaders(token);
@@ -334,10 +348,11 @@ export const Verifier = {
    * @param {Object} options - Verification options
    * @param {Buffer|Uint8Array} options.token - The SD-CWT token
    * @param {Object} options.publicKey - Issuer's public key {x, y}
+   * @param {boolean} [options.strict=false] - If true, enforce max depth of 16
    * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], headers: Object}>} Verified result
    */
-  async verifyWithoutDisclosures({ token, publicKey }) {
-    return this.verifyToken({ token, disclosures: [], publicKey });
+  async verifyWithoutDisclosures({ token, publicKey, strict = false }) {
+    return this.verifyToken({ token, disclosures: [], publicKey, strict });
   },
 };
 

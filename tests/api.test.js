@@ -13,6 +13,9 @@ import {
   toBeDecoy,
   generateKeyPair,
   Algorithm,
+  MAX_DEPTH,
+  validateClaimsClean,
+  assertClaimsClean,
 } from '../src/api.js';
 
 describe('SD-CWT High-Level API', () => {
@@ -702,6 +705,228 @@ describe('SD-CWT High-Level API', () => {
         assert.strictEqual(result.claims.get(500), 'secret');
         assert.strictEqual(result.claims.get(501), 'public');
       }
+    });
+  });
+
+});
+
+describe('API: Strict Depth and Validation', () => {
+  const keyPair = generateKeyPair();
+
+  describe('MAX_DEPTH constant export', () => {
+    it('should export MAX_DEPTH as 16', () => {
+      assert.strictEqual(MAX_DEPTH, 16);
+    });
+  });
+
+  describe('Issuer with strict mode', () => {
+    it('should issue with strict mode enabled', async () => {
+      const claims = new Map([
+        [toBeRedacted(500), 'secret'],
+        [501, 'public'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+        strict: true,
+      });
+
+      assert.ok(token.length > 0);
+      assert.strictEqual(disclosures.length, 1);
+    });
+
+    it('should reject deeply nested structures in strict mode', async () => {
+      // Build structure exceeding depth 16
+      let current = new Map([['val', 'deep']]);
+      for (let i = 0; i < 17; i++) {
+        current = new Map([['nested', current]]);
+      }
+
+      await assert.rejects(
+        Issuer.issue({
+          claims: current,
+          privateKey: keyPair.privateKey,
+          strict: true,
+        }),
+        /exceeds maximum/
+      );
+    });
+  });
+
+  describe('Verifier with strict mode', () => {
+    it('should verify with strict mode enabled', async () => {
+      const claims = new Map([
+        [toBeRedacted(500), 'secret'],
+        [501, 'public'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+      });
+
+      const presentation = Holder.present(token, disclosures);
+
+      const result = await Verifier.verify({
+        presentation,
+        publicKey: keyPair.publicKey,
+        strict: true,
+      });
+
+      assert.strictEqual(result.claims.get(500), 'secret');
+    });
+  });
+
+  describe('Verifier with requireClean option', () => {
+    it('should pass requireClean when all disclosures provided', async () => {
+      const claims = new Map([
+        [toBeRedacted(500), 'secret'],
+        [501, 'public'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+      });
+
+      const presentation = Holder.present(token, disclosures);
+
+      // Should not throw with requireClean when fully disclosed
+      const result = await Verifier.verify({
+        presentation,
+        publicKey: keyPair.publicKey,
+        requireClean: true,
+      });
+
+      assert.strictEqual(result.claims.get(500), 'secret');
+    });
+
+    it('should fail requireClean when disclosures are missing', async () => {
+      const claims = new Map([
+        [toBeRedacted(500), 'secret'],
+        [501, 'public'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+      });
+
+      // Present with no disclosures
+      const presentation = Holder.present(token, []);
+
+      // Should throw because claims still have redacted entries
+      await assert.rejects(
+        Verifier.verify({
+          presentation,
+          publicKey: keyPair.publicKey,
+          requireClean: true,
+        }),
+        /SD-CWT artifacts/
+      );
+    });
+  });
+
+  describe('validateClaimsClean and assertClaimsClean exports', () => {
+    it('should export validateClaimsClean function', () => {
+      const claims = new Map([['name', 'Alice']]);
+      const result = validateClaimsClean(claims);
+      assert.ok(result.isClean);
+      assert.deepStrictEqual(result.issues, []);
+    });
+
+    it('should export assertClaimsClean function', () => {
+      const claims = new Map([['name', 'Alice']]);
+      assert.doesNotThrow(() => assertClaimsClean(claims));
+    });
+
+    it('should detect unprocessed toBeRedacted tags', () => {
+      const claims = new Map([
+        [toBeRedacted('secret'), 'value'],
+      ]);
+      const result = validateClaimsClean(claims);
+      assert.strictEqual(result.isClean, false);
+      assert.ok(result.issues.length > 0);
+    });
+  });
+
+  describe('Full API flow with nested structures and decoys', () => {
+    it('should handle deeply nested structures with decoys', async () => {
+      const nested = new Map([
+        [toBeRedacted('inner'), 'inner-secret'],
+        ['visible', 'inner-public'],
+      ]);
+
+      const claims = new Map([
+        ['nested', nested],
+        [toBeRedacted('outer'), 'outer-secret'],
+        [toBeDecoy(2), null],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+      });
+
+      // 2 real disclosures (inner + outer)
+      assert.strictEqual(disclosures.length, 2);
+
+      const presentation = Holder.present(token, disclosures);
+
+      const result = await Verifier.verify({
+        presentation,
+        publicKey: keyPair.publicKey,
+      });
+
+      // Verify reconstructed values
+      assert.strictEqual(result.claims.get('outer'), 'outer-secret');
+      const nestedResult = result.claims.get('nested');
+      assert.ok(nestedResult instanceof Map);
+      assert.strictEqual(nestedResult.get('inner'), 'inner-secret');
+      assert.strictEqual(nestedResult.get('visible'), 'inner-public');
+
+      // Should be clean (no artifacts left after full disclosure)
+      const cleanResult = validateClaimsClean(result.claims);
+      assert.ok(cleanResult.isClean, `Issues: ${cleanResult.issues.join(', ')}`);
+    });
+
+    it('should handle arrays with redactable elements and decoys', async () => {
+      const claims = new Map([
+        ['items', [
+          toBeRedacted('secret-item'),
+          'public-item',
+          toBeDecoy(1),
+        ]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: keyPair.privateKey,
+      });
+
+      // 1 real disclosure for array element
+      assert.strictEqual(disclosures.length, 1);
+
+      const presentation = Holder.present(token, disclosures);
+
+      const result = await Verifier.verify({
+        presentation,
+        publicKey: keyPair.publicKey,
+      });
+
+      const items = result.claims.get('items');
+      assert.strictEqual(items[0], 'secret-item');
+      assert.strictEqual(items[1], 'public-item');
+      // items[2] is decoy - remains as RedactedClaimElement
+
+      // Should NOT be clean with default validation (decoy remains)
+      const strictResult = validateClaimsClean(result.claims);
+      assert.strictEqual(strictResult.isClean, false);
+
+      // Should be clean with allowRedacted
+      const lenientResult = validateClaimsClean(result.claims, { allowRedacted: true });
+      assert.ok(lenientResult.isClean);
     });
   });
 
