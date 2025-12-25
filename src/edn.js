@@ -264,6 +264,11 @@ function formatValueWithComments(value, depth) {
   }
 
   if (value instanceof cbor.Tag) {
+    // Tag 60 is RedactedClaimElement - display as null per spec
+    // (undisclosed array elements should be null to preserve indices)
+    if (value.tag === 60) {
+      return 'null';
+    }
     const tagContent = formatValueWithComments(value.contents, depth);
     return `${value.tag}(${tagContent})`;
   }

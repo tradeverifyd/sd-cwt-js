@@ -4116,6 +4116,9 @@ ${pad}}`;
       return `h'${lines.join("\n" + pad1)}'`;
     }
     if (value instanceof i) {
+      if (value.tag === 60) {
+        return "null";
+      }
       const tagContent = formatValueWithComments(value.contents, depth);
       return `${value.tag}(${tagContent})`;
     }
