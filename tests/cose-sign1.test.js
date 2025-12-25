@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
-import { sign, verify, generateKeyPair, Algorithm } from '../src/cose-sign1.js';
+import { sign, verify, generateKeyPair, getHeaders, Algorithm } from '../src/cose-sign1.js';
 
 describe('COSE Sign1 Module', () => {
 
@@ -254,6 +254,405 @@ describe('COSE Sign1 Module', () => {
       const verified = await verify(signed, verifierKey);
       
       assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+  });
+
+  describe('custom header parameters', () => {
+    it('should sign with content_type in protected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from(JSON.stringify({ data: 'test' }));
+      
+      const signed = await sign(payload, privateKey, {
+        protectedHeaders: { content_type: 'application/json' }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with kid in protected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test payload');
+      
+      const signed = await sign(payload, privateKey, {
+        protectedHeaders: { kid: 'protected-key-id' }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with kid in unprotected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test payload');
+      
+      const signed = await sign(payload, privateKey, {
+        unprotectedHeaders: { kid: 'unprotected-key-id' }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with x5chain (X.509 certificate chain)', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with x5chain');
+      
+      // Simulated certificate chain (just example bytes for testing)
+      const mockCertChain = Buffer.from('mock-certificate-data');
+      
+      const signed = await sign(payload, privateKey, {
+        unprotectedHeaders: { x5chain: mockCertChain }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with crit (critical) header', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with critical header');
+      
+      const signed = await sign(payload, privateKey, {
+        protectedHeaders: { crit: [1] } // alg is critical
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with numeric content_type', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with numeric content type');
+      
+      // Content type can be a numeric value (CoAP content format)
+      const signed = await sign(payload, privateKey, {
+        protectedHeaders: { content_type: 60 } // application/cbor
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should sign with combined protected and unprotected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with multiple headers');
+      
+      const signed = await sign(payload, privateKey, {
+        kid: 'main-key-id',
+        protectedHeaders: { 
+          content_type: 'application/cwt'
+        },
+        unprotectedHeaders: { 
+          x5chain: Buffer.from('cert-chain')
+        }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should override kid option with unprotectedHeaders kid', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test kid override');
+      
+      // When both kid option and unprotectedHeaders.kid are provided,
+      // unprotectedHeaders.kid should be used (spread after)
+      const signed = await sign(payload, privateKey, {
+        kid: 'option-kid',
+        unprotectedHeaders: { kid: 'header-kid' }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should handle IV in unprotected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with IV');
+      
+      // IV is typically for encryption but can be included
+      const iv = crypto.randomBytes(12);
+      
+      const signed = await sign(payload, privateKey, {
+        unprotectedHeaders: { IV: iv }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should handle Partial_IV in unprotected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with Partial IV');
+      
+      const partialIv = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+      
+      const signed = await sign(payload, privateKey, {
+        unprotectedHeaders: { Partial_IV: partialIv }
+      });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should preserve payload integrity with various header combinations', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const testCases = [
+        { protectedHeaders: { content_type: 'text/plain' } },
+        { unprotectedHeaders: { kid: 'test-1' } },
+        { protectedHeaders: { crit: [1] }, unprotectedHeaders: { kid: 'test-2' } },
+        { kid: 'simple-kid' },
+        { protectedHeaders: { content_type: 50 }, kid: 'numeric-ct' },
+      ];
+
+      for (const options of testCases) {
+        const payload = Buffer.from(`payload for ${JSON.stringify(options)}`);
+        const signed = await sign(payload, privateKey, options);
+        const verified = await verify(signed, publicKey);
+        
+        assert.deepStrictEqual(
+          Buffer.from(verified), 
+          payload,
+          `Failed for options: ${JSON.stringify(options)}`
+        );
+      }
+    });
+  });
+
+  describe('private/custom header parameters (integer keys)', () => {
+    it('should sign with custom protected header using negative integer key', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with private header');
+      
+      // Use negative integer key for private use (per COSE spec)
+      const signed = await sign(payload, privateKey, {
+        customProtectedHeaders: { [-65537]: 'private-value' }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      // Verify the custom header is present
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-65537), 'private-value');
+    });
+
+    it('should sign with custom unprotected header using negative integer key', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with unprotected private header');
+      
+      const signed = await sign(payload, privateKey, {
+        customUnprotectedHeaders: { [-65538]: 'unprotected-private' }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      // Verify the custom header is present
+      const { unprotectedHeaders } = getHeaders(signed);
+      assert.strictEqual(unprotectedHeaders.get(-65538), 'unprotected-private');
+    });
+
+    it('should sign with custom header using Map', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('test with Map header');
+      
+      const customHeaders = new Map();
+      customHeaders.set(-100, 'value-100');
+      customHeaders.set(-200, Buffer.from('binary-value'));
+      
+      const signed = await sign(payload, privateKey, {
+        customProtectedHeaders: customHeaders
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-100), 'value-100');
+      assert.deepStrictEqual(Buffer.from(protectedHeaders.get(-200)), Buffer.from('binary-value'));
+    });
+
+    it('should sign with multiple custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('multiple custom headers');
+      
+      const signed = await sign(payload, privateKey, {
+        customProtectedHeaders: {
+          [-1000]: 'header-1000',
+          [-1001]: 12345,
+          [-1002]: true,
+        },
+        customUnprotectedHeaders: {
+          [-2000]: 'unprotected-2000',
+          [-2001]: ['array', 'value'],
+        }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders, unprotectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-1000), 'header-1000');
+      assert.strictEqual(protectedHeaders.get(-1001), 12345);
+      assert.strictEqual(protectedHeaders.get(-1002), true);
+      assert.strictEqual(unprotectedHeaders.get(-2000), 'unprotected-2000');
+      assert.deepStrictEqual(unprotectedHeaders.get(-2001), ['array', 'value']);
+    });
+
+    it('should combine standard and custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('combined headers');
+      
+      const signed = await sign(payload, privateKey, {
+        kid: 'my-key-id',
+        protectedHeaders: { content_type: 'application/cbor' },
+        customProtectedHeaders: { [-9999]: 'custom-protected' },
+        customUnprotectedHeaders: { [-8888]: 'custom-unprotected' }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders, unprotectedHeaders } = getHeaders(signed);
+      
+      // Check algorithm is present (label 1)
+      assert.ok(protectedHeaders.has(1), 'Should have alg header');
+      
+      // Check content_type (label 3)
+      assert.strictEqual(protectedHeaders.get(3), 'application/cbor');
+      
+      // Check custom protected header
+      assert.strictEqual(protectedHeaders.get(-9999), 'custom-protected');
+      
+      // Check kid (label 4)
+      assert.strictEqual(unprotectedHeaders.get(4), 'my-key-id');
+      
+      // Check custom unprotected header
+      assert.strictEqual(unprotectedHeaders.get(-8888), 'custom-unprotected');
+    });
+
+    it('should handle binary data in custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('binary custom header test');
+      
+      const binaryValue = crypto.randomBytes(32);
+      
+      const signed = await sign(payload, privateKey, {
+        customProtectedHeaders: { [-12345]: binaryValue }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.deepStrictEqual(Buffer.from(protectedHeaders.get(-12345)), binaryValue);
+    });
+
+    it('should handle nested structures in custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair();
+      const payload = Buffer.from('nested custom header');
+      
+      const nestedValue = {
+        issuer: 'test-issuer',
+        claims: ['read', 'write'],
+        metadata: { version: 1 }
+      };
+      
+      const signed = await sign(payload, privateKey, {
+        customUnprotectedHeaders: { [-77777]: nestedValue }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { unprotectedHeaders } = getHeaders(signed);
+      assert.deepStrictEqual(unprotectedHeaders.get(-77777), nestedValue);
+    });
+
+    it('should work with ES384 and custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.ES384);
+      const payload = Buffer.from('ES384 with custom headers');
+      
+      const signed = await sign(payload, privateKey, {
+        algorithm: Algorithm.ES384,
+        customProtectedHeaders: { [-555]: 'es384-custom' }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-555), 'es384-custom');
+      assert.strictEqual(protectedHeaders.get(1), -35); // ES384 alg id
+    });
+
+    it('should work with ES512 and custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.ES512);
+      const payload = Buffer.from('ES512 with custom headers');
+      
+      const signed = await sign(payload, privateKey, {
+        algorithm: Algorithm.ES512,
+        customProtectedHeaders: { [-666]: 'es512-custom' }
+      });
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-666), 'es512-custom');
+      assert.strictEqual(protectedHeaders.get(1), -36); // ES512 alg id
+    });
+  });
+
+  describe('getHeaders', () => {
+    it('should extract protected headers from a signed message', async () => {
+      const { privateKey } = generateKeyPair();
+      const payload = Buffer.from('test');
+      
+      const signed = await sign(payload, privateKey, {
+        protectedHeaders: { content_type: 'text/plain' }
+      });
+      
+      const { protectedHeaders } = getHeaders(signed);
+      
+      assert.ok(protectedHeaders instanceof Map);
+      assert.strictEqual(protectedHeaders.get(1), -7); // ES256
+      assert.strictEqual(protectedHeaders.get(3), 'text/plain'); // content_type
+    });
+
+    it('should extract unprotected headers from a signed message', async () => {
+      const { privateKey } = generateKeyPair();
+      const payload = Buffer.from('test');
+      
+      const signed = await sign(payload, privateKey, {
+        kid: 'test-kid'
+      });
+      
+      const { unprotectedHeaders } = getHeaders(signed);
+      
+      assert.ok(unprotectedHeaders instanceof Map);
+      // kid may be returned as Buffer or string depending on encoding
+      const kidValue = unprotectedHeaders.get(4);
+      const kidString = Buffer.isBuffer(kidValue) ? kidValue.toString() : kidValue;
+      assert.strictEqual(kidString, 'test-kid');
+    });
+
+    it('should throw for invalid input', () => {
+      assert.throws(
+        () => getHeaders(null),
+        /COSE Sign1 message is required/
+      );
+    });
+
+    it('should throw for invalid COSE structure', () => {
+      const invalidCbor = Buffer.from([0xa0]); // empty map
+      
+      assert.throws(
+        () => getHeaders(invalidCbor),
+        /Invalid COSE Sign1 structure/
+      );
     });
   });
 });
