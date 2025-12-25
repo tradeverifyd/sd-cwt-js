@@ -78,6 +78,29 @@
       font-weight: 300;
     }
 
+    .quick-start-btn {
+      margin-top: 1rem;
+      padding: 0.75rem 1.5rem;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-green));
+      border: none;
+      border-radius: 8px;
+      color: var(--bg-primary);
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
+    }
+
+    .quick-start-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 217, 255, 0.4);
+    }
+
+    .quick-start-btn:active {
+      transform: translateY(0);
+    }
+
     main {
       max-width: 900px;
       margin: 0 auto;
@@ -638,6 +661,38 @@
       margin-left: 0.5rem;
     }
 
+    .disclosure-item .disclosure-array-parent {
+      color: var(--accent-purple);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      margin-right: 0.25rem;
+      opacity: 0.9;
+    }
+
+    .disclosure-item.decoy-item {
+      background: linear-gradient(135deg, rgba(255, 200, 0, 0.1), rgba(255, 170, 0, 0.05));
+      border: 1px dashed var(--accent-yellow);
+      opacity: 0.8;
+    }
+
+    .disclosure-item .decoy-icon {
+      font-size: 1rem;
+      margin-right: 0.5rem;
+    }
+
+    .disclosure-item .decoy-label {
+      color: var(--accent-yellow);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+    }
+
+    .disclosure-item .decoy-hint {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      font-style: italic;
+      margin-left: 0.5rem;
+    }
+
     .key-section {
       background: var(--bg-tertiary);
       border-radius: 8px;
@@ -791,7 +846,8 @@
 <body>
   <header>
     <h1>SD-CWT Playground</h1>
-    <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank" style="color: var(--accent-cyan);">spec test vectors</a></p>
+    <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank" style="color: var(--accent-cyan);">spec</a> examples covering redacted claims, redacted array elements, and decoys (§10, §13.1)</p>
+    <button class="quick-start-btn" onclick="quickStart()">⚡ Quick Start with Spec Keys</button>
   </header>
 
   <main>
@@ -1137,13 +1193,18 @@
     let holderAlgorithm = 'ES256';  // Spec uses ES256 for holder
     let issuedToken = null;
     let disclosures = [];
+    let decoyCount = 0;  // Track number of decoys from EDN
+    let arrayDisclosureInfo = [];  // Track which arrays disclosures belong to
 
     // ==========================================================================
     // Initialize with Spec Example Data (Section 13.1)
     // ==========================================================================
     
-    // Claims from Section 13.1 example in EDN format
-    // Note: Tag 58 wraps the KEY to mark the entire claim for redaction
+    // Claims from Section 10 & 13.1 examples in EDN format
+    // This example demonstrates ALL SD-CWT features:
+    // - Tag 58 on map keys: marks key-value pairs for redaction
+    // - Tag 58 on array elements: marks array elements for redaction  
+    // - Tag 61 (decoys): inserts fake redacted entries to hide count
     // The cnf claim (8) will be auto-populated from the holder's public key
     const SPEC_CLAIMS_EDN = `{
   / iss / 1: "https://issuer.example",
@@ -1160,12 +1221,19 @@
     }
   },
   / most_recent_inspection_passed / 500: true,
-  / to be redacted: serial_number / 58(501): "ABCD-123456",
+  / to be redacted: inspector_license_number / 58(501): "ABCD-123456",
+  / inspection_dates - array with redacted elements / 502: [
+    / to be redacted: date 7-Feb-2019 / 58(1549560720),
+    / to be redacted: date 4-Feb-2021 / 58(1612560720),
+    / public: date 17-Jan-2023 / 1674004740
+  ],
   / inspection_location / 503: {
     "country": "us",
     / to be redacted / 58("region"): "ca",
-    / to be redacted / 58("postal_code"): "94188"
-  }
+    / to be redacted / 58("postal_code"): "94188",
+    / decoy: adds 1 fake redacted entry / 61(1): null
+  },
+  / decoy: adds 1 fake redacted entry at top level / 61(1): null
 }`;
 
     document.getElementById('issuerClaimsEdn').value = SPEC_CLAIMS_EDN;
@@ -1636,6 +1704,12 @@
         const claimsEdn = document.getElementById('issuerClaimsEdn').value;
         const parsedClaims = parseEdn(claimsEdn);
         
+        // Count decoys in the claims (before they get processed)
+        decoyCount = countDecoysInValue(parsedClaims);
+        
+        // Build array disclosure info to track which disclosures are array elements
+        arrayDisclosureInfo = buildArrayDisclosureInfo(parsedClaims);
+        
         // Validate that the cnf claim in EDN matches the loaded holder key
         validateCnfClaim(parsedClaims, holderKeyPair.publicKey);
         
@@ -1655,8 +1729,9 @@
         document.getElementById('issuerOutput').style.display = 'block';
         document.getElementById('issuedCwtHex').textContent = SDCWT.Hex.encode(result.token);
         
+        const decoyMsg = decoyCount > 0 ? ` + ${decoyCount} decoy(s)` : '';
         showStatus('issuerStatus', 
-          `Issued successfully with ${issuerAlgorithm}! ${disclosures.length} disclosure(s) generated.`, 'success');
+          `Issued successfully with ${issuerAlgorithm}! ${disclosures.length} disclosure(s)${decoyMsg} generated.`, 'success');
 
         // Auto-fill holder input
         document.getElementById('holderCwt').value = SDCWT.Hex.encode(result.token);
@@ -1673,14 +1748,16 @@
       const container = document.getElementById('disclosureList');
       container.innerHTML = '';
 
-      if (disclosures.length === 0) {
+      if (disclosures.length === 0 && decoyCount === 0) {
         document.getElementById('disclosureSelection').style.display = 'none';
         return;
       }
 
       document.getElementById('disclosureSelection').style.display = 'block';
 
-      disclosures.forEach((disclosure, index) => {
+      // Show real disclosures (selectable)
+      for (let index = 0; index < disclosures.length; index++) {
+        const disclosure = disclosures[index];
         const decoded = SDCWT.cbor.decode(disclosure);
         // SD-CWT spec disclosure format:
         // - Named claims (map entries): [salt, value, key]
@@ -1706,15 +1783,33 @@
             <span class="disclosure-salt" title="${saltHex}">(salt: ${saltDisplay})</span>
           `;
         } else {
-          // Array item: display just the value (salt: ...)
+          // Array item: use tracked array parent info
+          const arrayParent = arrayDisclosureInfo[index];
+          const parentLabel = arrayParent ? `<span class="disclosure-array-parent">${arrayParent}[]</span>` : '';
+          
           item.innerHTML = `
             <input type="checkbox" id="disclosure_${index}" checked data-index="${index}">
+            ${parentLabel}
             <span class="disclosure-value">${formatValuePreview(claimValue)}</span>
             <span class="disclosure-salt" title="${saltHex}">(salt: ${saltDisplay})</span>
           `;
         }
         container.appendChild(item);
-      });
+      }
+      
+      // Then, show decoys (non-selectable, visually distinct)
+      if (decoyCount > 0) {
+        for (let i = 0; i < decoyCount; i++) {
+          const item = document.createElement('div');
+          item.className = 'disclosure-item decoy-item';
+          item.innerHTML = `
+            <span class="decoy-icon">🎭</span>
+            <span class="decoy-label">Decoy digest #${i + 1}</span>
+            <span class="decoy-hint">(hides redaction count per §10)</span>
+          `;
+          container.appendChild(item);
+        }
+      }
     }
     
     function formatKeyPreview(key) {
@@ -1738,6 +1833,95 @@
         return `{map, ${value.size} entries}`;
       }
       return String(value);
+    }
+
+    // Count decoys (tag 61) in the EDN/parsed claims
+    function countDecoysInValue(value) {
+      let count = 0;
+      
+      if (value instanceof SDCWT.cbor.Tag) {
+        if (value.tag === 61) {
+          // Tag 61 is ToBeDecoy, contents is the count
+          return value.contents;
+        }
+        // Check contents of other tags
+        return countDecoysInValue(value.contents);
+      }
+      
+      if (value instanceof Map) {
+        for (const [k, v] of value) {
+          count += countDecoysInValue(k);
+          count += countDecoysInValue(v);
+        }
+      } else if (Array.isArray(value)) {
+        for (const elem of value) {
+          count += countDecoysInValue(elem);
+        }
+      }
+      
+      return count;
+    }
+    
+    // Build an array that tracks array parent info for each disclosure index
+    // Returns an array where each index corresponds to a disclosure index
+    // Value is either null (not an array element) or the array's key path
+    function buildArrayDisclosureInfo(parsedClaims) {
+      const info = [];
+      let disclosureIndex = 0;
+      
+      function processValue(value, keyPath) {
+        if (value instanceof SDCWT.cbor.Tag) {
+          if (value.tag === 58) {
+            // This is a redacted value - it will create a disclosure
+            info[disclosureIndex] = null; // Not an array element
+            disclosureIndex++;
+            // Process nested content for any additional disclosures
+            processValue(value.contents, keyPath);
+          } else if (value.tag === 61) {
+            // Decoy - no disclosure
+          } else {
+            processValue(value.contents, keyPath);
+          }
+          return;
+        }
+        
+        if (value instanceof Map) {
+          for (const [k, v] of value) {
+            // Check if the key is a ToBeRedacted tag
+            if (k instanceof SDCWT.cbor.Tag && k.tag === 58) {
+              // Key-level redaction - will create a disclosure
+              const actualKey = k.contents;
+              info[disclosureIndex] = null; // Not an array element
+              disclosureIndex++;
+              // Process the value for nested disclosures
+              const newPath = keyPath ? `${keyPath}.${formatKeyPreview(actualKey)}` : formatKeyPreview(actualKey);
+              processValue(v, newPath);
+            } else if (k instanceof SDCWT.cbor.Tag && k.tag === 61) {
+              // Decoy at key level - no disclosure
+            } else {
+              const newPath = keyPath ? `${keyPath}.${formatKeyPreview(k)}` : formatKeyPreview(k);
+              processValue(v, newPath);
+            }
+          }
+        } else if (Array.isArray(value)) {
+          for (const elem of value) {
+            if (elem instanceof SDCWT.cbor.Tag && elem.tag === 58) {
+              // Array element redaction - will create a disclosure
+              info[disclosureIndex] = keyPath; // This is an array element
+              disclosureIndex++;
+              // Process the value for nested disclosures
+              processValue(elem.contents, keyPath);
+            } else if (elem instanceof SDCWT.cbor.Tag && elem.tag === 61) {
+              // Decoy element - no disclosure
+            } else {
+              processValue(elem, keyPath);
+            }
+          }
+        }
+      }
+      
+      processValue(parsedClaims, '');
+      return info;
     }
 
     // ==========================================================================
@@ -2031,6 +2215,35 @@
       const stepEl = document.getElementById(`step${step}`);
       if (stepEl) {
         stepEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    // Quick start: load spec keys and go directly to Issue step
+    function quickStart() {
+      try {
+        // Load holder spec key (this is synchronous)
+        loadSpecHolderKey();
+        
+        // Load issuer spec key (this is synchronous)
+        loadSpecIssuerKey();
+        
+        // Mark steps 1 and 2 as complete
+        stepCompleted[1] = true;
+        stepCompleted[2] = true;
+        
+        // Go directly to Issue step (step 3)
+        currentStep = 3;
+        updateStepUI();
+        
+        // Scroll to step 3
+        const stepEl = document.getElementById('step3');
+        if (stepEl) {
+          stepEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        showStatus('issuerStatus', '⚡ Quick start: Spec keys loaded for both holder and issuer. Ready to issue!', 'info');
+      } catch (error) {
+        console.error('Quick start failed:', error);
       }
     }
 

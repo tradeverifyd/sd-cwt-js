@@ -2864,6 +2864,7 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     createSaltedDisclosure: () => createSaltedDisclosure,
     decodeDisclosure: () => decodeDisclosure,
     generateSalt: () => generateSalt,
+    getRedactedElementContents: () => getRedactedElementContents,
     getTagContents: () => getTagContents,
     hashDisclosure: () => hashDisclosure,
     isRedactedClaimElement: () => isRedactedClaimElement,
@@ -2901,6 +2902,8 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     Kid: 4,
     /** kcwt: Key Binding CWT (contains the SD-CWT in SD-KBT) */
     Kcwt: 13,
+    /** CWT_Claims: CWT Claims header parameter (RFC 9597) - claims in protected header */
+    CwtClaims: 15,
     /** typ: Content type */
     Typ: 16,
     /** sd_claims: Array of selectively disclosed claims */
@@ -2965,7 +2968,22 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     return value instanceof i && value.tag === Tag.ToBeRedacted;
   }
   function isRedactedClaimElement(value) {
-    return value instanceof i && value.tag === Tag.RedactedClaimElement;
+    if (value instanceof i && value.tag === Tag.RedactedClaimElement) {
+      return true;
+    }
+    if (value instanceof Map && value.get("tag") === Tag.RedactedClaimElement) {
+      return true;
+    }
+    return false;
+  }
+  function getRedactedElementContents(value) {
+    if (value instanceof i) {
+      return value.contents;
+    }
+    if (value instanceof Map) {
+      return value.get("contents");
+    }
+    throw new Error("Invalid redacted claim element");
   }
   function isToBeDecoy(value) {
     return value instanceof i && value.tag === Tag.ToBeDecoy;
@@ -3234,7 +3252,8 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     const remainingRedactedHashes = [];
     for (const element of redactedArray) {
       if (isRedactedClaimElement(element)) {
-        const hashBytes = element.contents instanceof Uint8Array ? element.contents : new Uint8Array(element.contents);
+        const rawContents = getRedactedElementContents(element);
+        const hashBytes = rawContents instanceof Uint8Array ? rawContents : new Uint8Array(rawContents);
         const hexKey = Buffer2.from(hashBytes).toString("hex");
         const entry = lookup.get(hexKey);
         if (entry && entry.decoded.claimName === void 0 && !entry.decoded.isDecoy) {
@@ -3346,6 +3365,7 @@ ${result.issues.join("\n")}`);
      * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm for redactions
      * @param {string|Buffer} [options.kid] - Key identifier
      * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
+     * @param {boolean} [options.claimsInProtectedHeader=false] - If true, place claims in CWT Claims header (15) instead of payload (per RFC 9597)
      * @returns {Promise<{token: Buffer, disclosures: Uint8Array[]}>} The signed SD-CWT and disclosures
      * 
      * @example
@@ -3360,7 +3380,7 @@ ${result.issues.join("\n")}`);
      *   privateKey: issuerKey.privateKey,
      * });
      */
-    async issue({ claims, privateKey, algorithm = "ES256", hashAlgorithm = "sha256", kid, strict = false }) {
+    async issue({ claims, privateKey, algorithm = "ES256", hashAlgorithm = "sha256", kid, strict = false, claimsInProtectedHeader = false }) {
       if (!(claims instanceof Map)) {
         throw new Error("Claims must be a Map");
       }
@@ -3384,11 +3404,17 @@ ${result.issues.join("\n")}`);
         throw new Error("cnf (8) claim MUST NOT be redacted (per spec Section 7)");
       }
       const { claims: processedClaims, disclosures } = processToBeRedacted(claims, { hashAlg: hashAlgorithm, strict });
-      const payload = Q(processedClaims);
       const customProtectedHeaders = /* @__PURE__ */ new Map();
       customProtectedHeaders.set(HeaderParam2.Typ, MediaType.SdCwt);
       if (disclosures.length > 0) {
         customProtectedHeaders.set(HeaderParam2.SdAlg, SdAlg.SHA256);
+      }
+      let payload;
+      if (claimsInProtectedHeader) {
+        customProtectedHeaders.set(HeaderParam2.CwtClaims, processedClaims);
+        payload = new Uint8Array(0);
+      } else {
+        payload = Q(processedClaims);
       }
       const token = await sign3(payload, privateKey, {
         algorithm,
@@ -3411,7 +3437,15 @@ ${result.issues.join("\n")}`);
       const decoded = l5(token, cborDecodeOptions2);
       const coseArray = decoded.contents || decoded;
       const payloadBytes = coseArray[2];
-      const claims = l5(payloadBytes, cborDecodeOptions2);
+      let claims;
+      const cwtClaimsHeader = protectedHeaders.get(HeaderParam2.CwtClaims);
+      if (cwtClaimsHeader instanceof Map) {
+        claims = cwtClaimsHeader;
+      } else if (payloadBytes && payloadBytes.length > 0) {
+        claims = l5(payloadBytes, cborDecodeOptions2);
+      } else {
+        claims = /* @__PURE__ */ new Map();
+      }
       return { claims, protectedHeaders, unprotectedHeaders };
     },
     /**
@@ -3558,9 +3592,10 @@ ${result.issues.join("\n")}`);
   function collectRedactedHashesFromArray(array, hashSet) {
     for (const element of array) {
       if (isRedactedClaimElement(element)) {
-        const hashBytes = element.contents instanceof Uint8Array ? element.contents : new Uint8Array(element.contents);
+        const rawContents = getRedactedElementContents(element);
+        const hashBytes = rawContents instanceof Uint8Array ? rawContents : new Uint8Array(rawContents);
         hashSet.add(Buffer2.from(hashBytes).toString("hex"));
-      } else if (element instanceof Map) {
+      } else if (element instanceof Map && !element.has("tag")) {
         collectRedactedHashes(element, hashSet);
       } else if (Array.isArray(element)) {
         collectRedactedHashesFromArray(element, hashSet);
@@ -3620,7 +3655,16 @@ ${result.issues.join("\n")}`);
         throw new Error(`Invalid SD-KBT: typ must be "${MediaType.KbCwt}", got "${kbtTyp}"`);
       }
       const sdCwtPayloadBytes = await verify3(sdCwtBytes, issuerPublicKey);
-      const sdCwtClaims = l5(sdCwtPayloadBytes, cborDecodeOptions2);
+      const sdCwtHeaders = getHeaders(sdCwtBytes);
+      const cwtClaimsHeader = sdCwtHeaders.protectedHeaders.get(HeaderParam2.CwtClaims);
+      let sdCwtClaims;
+      if (cwtClaimsHeader instanceof Map) {
+        sdCwtClaims = cwtClaimsHeader;
+      } else if (sdCwtPayloadBytes && sdCwtPayloadBytes.length > 0) {
+        sdCwtClaims = l5(sdCwtPayloadBytes, cborDecodeOptions2);
+      } else {
+        throw new Error("Invalid SD-CWT: no claims in payload or CWT Claims header (15)");
+      }
       const cnfClaim = sdCwtClaims.get(ClaimKey.Cnf);
       if (!cnfClaim) {
         throw new Error("Invalid SD-CWT: missing cnf (8) claim with Holder confirmation key");
@@ -3654,7 +3698,6 @@ ${result.issues.join("\n")}`);
           throw new Error("Nonce mismatch");
         }
       }
-      const sdCwtHeaders = getHeaders(sdCwtBytes);
       const disclosures = sdCwtHeaders.unprotectedHeaders.get(HeaderParam2.SdClaims) || [];
       const validatedDisclosures = validateDisclosures(sdCwtClaims, disclosures, hashAlgorithm);
       const { claims, redactedKeys } = reconstructClaims(
@@ -3915,6 +3958,15 @@ ${redactedKeys.length} undisclosed redacted key(s) remain`);
     const name = CWT_CLAIM_NAMES[key];
     return name ? `/ ${name} / ` : "";
   }
+  function getRedactionComment(key) {
+    if (key instanceof i && key.tag === 58) {
+      if (typeof key.contents === "number") {
+        return { isRedacted: true, comment: "/ to be redacted / " };
+      }
+      return { isRedacted: true, comment: "/ to be redacted / " };
+    }
+    return { isRedacted: false, comment: "" };
+  }
   var EDN = {
     /**
      * Convert a JavaScript value to EDN string
@@ -4029,7 +4081,13 @@ ${pad}}`;
     const pad1 = "  ".repeat(depth + 1);
     const entries = [];
     for (const [key, value] of map) {
-      const comment = addComments && typeof key === "number" ? getClaimComment(key) : "";
+      let comment = "";
+      const redaction = getRedactionComment(key);
+      if (redaction.isRedacted) {
+        comment = redaction.comment;
+      } else if (addComments && typeof key === "number") {
+        comment = getClaimComment(key);
+      }
       const keyStr = formatValueWithComments(key, depth + 1);
       const valStr = formatValueWithComments(value, depth + 1);
       entries.push(`${pad1}${comment}${keyStr}: ${valStr}`);
