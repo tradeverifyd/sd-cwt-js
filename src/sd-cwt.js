@@ -47,6 +47,8 @@ export const HeaderParam = {
   Kid: 4,
   /** kcwt: Key Binding CWT (contains the SD-CWT in SD-KBT) */
   Kcwt: 13,
+  /** CWT_Claims: CWT Claims header parameter (RFC 9597) - claims in protected header */
+  CwtClaims: 15,
   /** typ: Content type */
   Typ: 16,
   /** sd_claims: Array of selectively disclosed claims */
@@ -189,11 +191,37 @@ export function isToBeRedacted(value) {
 /**
  * Checks if a value is a "Redacted Claim Element" tagged value
  * 
+ * Handles both cbor.Tag instances and Map representations (which can occur
+ * when tags are nested in protected headers and re-decoded).
+ * 
  * @param {any} value - The value to check
  * @returns {boolean} True if the value is tagged with tag 60
  */
 export function isRedactedClaimElement(value) {
-  return value instanceof cbor.Tag && value.tag === Tag.RedactedClaimElement;
+  if (value instanceof cbor.Tag && value.tag === Tag.RedactedClaimElement) {
+    return true;
+  }
+  // Handle Map representation of tags (occurs in some encoding paths)
+  if (value instanceof Map && value.get('tag') === Tag.RedactedClaimElement) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Gets the contents of a redacted claim element, handling both representations.
+ * 
+ * @param {cbor.Tag|Map} value - The tagged value
+ * @returns {Uint8Array} The hash contents
+ */
+export function getRedactedElementContents(value) {
+  if (value instanceof cbor.Tag) {
+    return value.contents;
+  }
+  if (value instanceof Map) {
+    return value.get('contents');
+  }
+  throw new Error('Invalid redacted claim element');
 }
 
 /**
@@ -684,9 +712,10 @@ function reconstructArrayRecursive(redactedArray, lookup, strict, depth) {
   for (const element of redactedArray) {
     if (isRedactedClaimElement(element)) {
       // This is a redacted element - try to find matching disclosure
-      const hashBytes = element.contents instanceof Uint8Array 
-        ? element.contents 
-        : new Uint8Array(element.contents);
+      const rawContents = getRedactedElementContents(element);
+      const hashBytes = rawContents instanceof Uint8Array 
+        ? rawContents 
+        : new Uint8Array(rawContents);
       const hexKey = Buffer.from(hashBytes).toString('hex');
       const entry = lookup.get(hexKey);
       

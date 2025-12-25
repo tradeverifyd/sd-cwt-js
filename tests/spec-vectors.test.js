@@ -1107,5 +1107,249 @@ describe('SD-CWT Spec Test Vectors', () => {
 
   });
 
+  describe('CWT Claims Header Parameter (RFC 9597 / Section 17.1)', () => {
+    // Tests for claims in protected header instead of payload
+    // Per RFC 9597, CWT Claims header parameter (15) can contain claims
+
+    it('should issue SD-CWT with claims in protected header', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [2, 'https://device.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, true],
+        [toBeRedacted(501), 'secret-value'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,  // Enable claims in header
+      });
+
+      assert.ok(token.length > 0);
+      assert.strictEqual(disclosures.length, 1);
+
+      // Verify the structure - claims should be in header 15
+      const headers = coseSign1.getHeaders(token);
+      
+      // CWT Claims header (15) should contain the claims
+      assert.ok(headers.protectedHeaders.has(15), 'CWT Claims (15) must be in protected header');
+      const headerClaims = headers.protectedHeaders.get(15);
+      assert.ok(headerClaims instanceof Map, 'CWT Claims value must be a Map');
+      
+      // Verify claims are in the header
+      assert.strictEqual(headerClaims.get(1), 'https://issuer.example');
+      assert.strictEqual(headerClaims.get(500), true);
+      
+      // Payload should be empty
+      const decoded = cbor.decode(token);
+      const coseArray = decoded.contents || decoded;
+      const payload = coseArray[2];
+      assert.strictEqual(payload.length, 0, 'Payload should be empty when claims in header');
+    });
+
+    it('should parse SD-CWT with claims in protected header', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, true],
+        [toBeRedacted(501), 'secret-value'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,
+      });
+
+      // Parse should work and return claims from header
+      const parsed = Holder.parse(token);
+      
+      assert.ok(parsed.claims instanceof Map);
+      assert.strictEqual(parsed.claims.get(1), 'https://issuer.example');
+      assert.strictEqual(parsed.claims.get(500), true);
+      
+      // Redacted claim should be present as simple(59) array
+      let hasRedactedKeys = false;
+      for (const key of parsed.claims.keys()) {
+        if (sdCwt.isRedactedKeysKey(key)) {
+          hasRedactedKeys = true;
+          break;
+        }
+      }
+      assert.ok(hasRedactedKeys, 'Should have redacted keys marker');
+    });
+
+    it('should verify SD-CWT with claims in protected header', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [2, 'https://device.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, true],
+        [toBeRedacted(501), 'LICENSE-12345'],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,
+      });
+
+      // Create presentation
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      // Verify should work
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      // Verify claims
+      assert.strictEqual(result.claims.get(1), 'https://issuer.example');
+      assert.strictEqual(result.claims.get(2), 'https://device.example');
+      assert.strictEqual(result.claims.get(500), true);
+      assert.strictEqual(result.claims.get(501), 'LICENSE-12345');
+    });
+
+    it('should handle array disclosures with claims in protected header', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [502, [
+          toBeRedacted('secret-date-1'),
+          toBeRedacted('secret-date-2'),
+          'public-date',
+        ]],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,
+      });
+
+      assert.strictEqual(disclosures.length, 2);
+
+      // Parse and check array structure
+      const parsed = Holder.parse(token);
+      const arr = parsed.claims.get(502);
+      
+      assert.ok(Array.isArray(arr));
+      assert.strictEqual(arr.length, 3);
+      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
+      assert.ok(sdCwt.isRedactedClaimElement(arr[1]));
+      assert.strictEqual(arr[2], 'public-date');
+
+      // Full verification with disclosures
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      const resultArr = result.claims.get(502);
+      assert.strictEqual(resultArr[0], 'secret-date-1');
+      assert.strictEqual(resultArr[1], 'secret-date-2');
+      assert.strictEqual(resultArr[2], 'public-date');
+    });
+
+    it('should handle nested map disclosures with claims in protected header', async () => {
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [503, new Map([
+          ['country', 'us'],
+          [toBeRedacted('region'), 'ca'],
+          [toBeRedacted('postal_code'), '94188'],
+        ])],
+      ]);
+
+      const { token, disclosures } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,
+      });
+
+      assert.strictEqual(disclosures.length, 2);
+
+      // Verify with all disclosures
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: disclosures,
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      const result = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_KEY.publicKey,
+        expectedAudience: 'https://verifier.example',
+      });
+
+      const location = result.claims.get(503);
+      assert.ok(location instanceof Map);
+      assert.strictEqual(location.get('country'), 'us');
+      assert.strictEqual(location.get('region'), 'ca');
+      assert.strictEqual(location.get('postal_code'), '94188');
+    });
+
+    it('should maintain protected header integrity for claims', async () => {
+      // Claims in protected header are protected by the signature
+      const claims = new Map([
+        [1, 'https://issuer.example'],
+        [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
+        [500, 'important-claim'],
+      ]);
+
+      const { token } = await Issuer.issue({
+        claims,
+        privateKey: ISSUER_KEY.privateKey,
+        algorithm: 'ES384',
+        claimsInProtectedHeader: true,
+      });
+
+      // Attempting to verify with wrong key should fail
+      // (proving the protected header is integrity-protected)
+      const kbt = await Holder.present({
+        token,
+        selectedDisclosures: [],
+        holderPrivateKey: HOLDER_KEY.privateKey,
+        audience: 'https://verifier.example',
+        algorithm: 'ES256',
+      });
+
+      await assert.rejects(
+        Verifier.verify({
+          presentation: kbt,
+          issuerPublicKey: HOLDER_KEY.publicKey, // Wrong key!
+          expectedAudience: 'https://verifier.example',
+        }),
+        /Signature verification failed|Invalid.*key/i
+      );
+    });
+
+  });
+
 });
 

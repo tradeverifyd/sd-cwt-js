@@ -58,6 +58,7 @@ export const Issuer = {
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm for redactions
    * @param {string|Buffer} [options.kid] - Key identifier
    * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
+   * @param {boolean} [options.claimsInProtectedHeader=false] - If true, place claims in CWT Claims header (15) instead of payload (per RFC 9597)
    * @returns {Promise<{token: Buffer, disclosures: Uint8Array[]}>} The signed SD-CWT and disclosures
    * 
    * @example
@@ -72,7 +73,7 @@ export const Issuer = {
    *   privateKey: issuerKey.privateKey,
    * });
    */
-  async issue({ claims, privateKey, algorithm = 'ES256', hashAlgorithm = 'sha256', kid, strict = false }) {
+  async issue({ claims, privateKey, algorithm = 'ES256', hashAlgorithm = 'sha256', kid, strict = false, claimsInProtectedHeader = false }) {
     if (!(claims instanceof Map)) {
       throw new Error('Claims must be a Map');
     }
@@ -105,9 +106,6 @@ export const Issuer = {
     // Process claims to handle toBeRedacted and toBeDecoy tags
     const { claims: processedClaims, disclosures } = sdCwt.processToBeRedacted(claims, { hashAlg: hashAlgorithm, strict });
 
-    // Encode claims as CBOR payload
-    const payload = cbor.encode(processedClaims);
-
     // Build custom protected headers for SD-CWT
     const customProtectedHeaders = new Map();
     
@@ -117,6 +115,18 @@ export const Issuer = {
     // Add sd_alg header if there are disclosures
     if (disclosures.length > 0) {
       customProtectedHeaders.set(sdCwt.HeaderParam.SdAlg, sdCwt.SdAlg.SHA256);
+    }
+
+    // Encode claims - either in payload or in CWT Claims header (15) per RFC 9597
+    let payload;
+    if (claimsInProtectedHeader) {
+      // Place claims in CWT Claims header parameter (15)
+      customProtectedHeaders.set(sdCwt.HeaderParam.CwtClaims, processedClaims);
+      // Per RFC 9597, payload should be nil (empty bstr) when claims are in header
+      payload = new Uint8Array(0);
+    } else {
+      // Standard: claims in payload
+      payload = cbor.encode(processedClaims);
     }
 
     // Sign the token
@@ -156,7 +166,22 @@ export const Holder = {
     const coseArray = decoded.contents || decoded;
     const payloadBytes = coseArray[2];
     
-    const claims = cbor.decode(payloadBytes, sdCwt.cborDecodeOptions);
+    // Check for claims in CWT Claims header (15) per RFC 9597
+    // If payload is empty/nil, use claims from header 15
+    let claims;
+    const cwtClaimsHeader = protectedHeaders.get(sdCwt.HeaderParam.CwtClaims);
+    
+    if (cwtClaimsHeader instanceof Map) {
+      // Claims are in protected header (RFC 9597)
+      // Payload should be empty/nil in this case
+      claims = cwtClaimsHeader;
+    } else if (payloadBytes && payloadBytes.length > 0) {
+      // Standard: claims in payload
+      claims = cbor.decode(payloadBytes, sdCwt.cborDecodeOptions);
+    } else {
+      // Empty payload and no claims header - return empty map
+      claims = new Map();
+    }
 
     return { claims, protectedHeaders, unprotectedHeaders };
   },
@@ -377,11 +402,13 @@ function collectRedactedHashes(claims, hashSet) {
 function collectRedactedHashesFromArray(array, hashSet) {
   for (const element of array) {
     if (sdCwt.isRedactedClaimElement(element)) {
-      const hashBytes = element.contents instanceof Uint8Array 
-        ? element.contents 
-        : new Uint8Array(element.contents);
+      const rawContents = sdCwt.getRedactedElementContents(element);
+      const hashBytes = rawContents instanceof Uint8Array 
+        ? rawContents 
+        : new Uint8Array(rawContents);
       hashSet.add(Buffer.from(hashBytes).toString('hex'));
-    } else if (element instanceof Map) {
+    } else if (element instanceof Map && !element.has('tag')) {
+      // Regular Map, not a tag representation
       collectRedactedHashes(element, hashSet);
     } else if (Array.isArray(element)) {
       collectRedactedHashesFromArray(element, hashSet);
@@ -462,7 +489,22 @@ export const Verifier = {
 
     // Step 2: Verify the SD-CWT signature using Issuer's public key
     const sdCwtPayloadBytes = await coseSign1.verify(sdCwtBytes, issuerPublicKey);
-    const sdCwtClaims = cbor.decode(sdCwtPayloadBytes, sdCwt.cborDecodeOptions);
+    
+    // Get SD-CWT headers to check for claims in protected header (RFC 9597)
+    const sdCwtHeaders = coseSign1.getHeaders(sdCwtBytes);
+    const cwtClaimsHeader = sdCwtHeaders.protectedHeaders.get(sdCwt.HeaderParam.CwtClaims);
+    
+    // Claims can be in payload OR in CWT Claims header (15) per RFC 9597
+    let sdCwtClaims;
+    if (cwtClaimsHeader instanceof Map) {
+      // Claims are in protected header
+      sdCwtClaims = cwtClaimsHeader;
+    } else if (sdCwtPayloadBytes && sdCwtPayloadBytes.length > 0) {
+      // Claims are in payload
+      sdCwtClaims = cbor.decode(sdCwtPayloadBytes, sdCwt.cborDecodeOptions);
+    } else {
+      throw new Error('Invalid SD-CWT: no claims in payload or CWT Claims header (15)');
+    }
 
     // Step 3: Extract the confirmation key from cnf claim
     const cnfClaim = sdCwtClaims.get(sdCwt.ClaimKey.Cnf);
@@ -517,7 +559,7 @@ export const Verifier = {
     }
 
     // Step 7: Extract disclosures from SD-CWT unprotected header
-    const sdCwtHeaders = coseSign1.getHeaders(sdCwtBytes);
+    // (sdCwtHeaders was already retrieved above for CWT Claims check)
     const disclosures = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdClaims) || [];
 
     // Validate disclosures match redacted entries
