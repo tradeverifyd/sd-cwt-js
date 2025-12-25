@@ -54,6 +54,14 @@ export const SdAlg = {
 };
 
 /**
+ * Default CBOR decode options for SD-CWT.
+ * Uses preferMap: true to ensure CBOR maps decode as JavaScript Maps.
+ */
+export const cborDecodeOptions = {
+  preferMap: true,
+};
+
+/**
  * Creates a "To Be Redacted" tagged value.
  * 
  * This tag indicates to the Issuer that the wrapped value should be
@@ -348,13 +356,15 @@ export function processArrayToBeRedacted(array, hashAlg = 'sha256') {
 }
 
 /**
- * Decodes a disclosure and returns its components
+ * Decodes a disclosure and returns its components.
+ * Uses preferMap: true to ensure any CBOR maps in the disclosure
+ * are decoded as JavaScript Maps.
  * 
  * @param {Uint8Array} disclosure - CBOR-encoded disclosure
  * @returns {{salt: Uint8Array, value: any, claimName?: string|number}} Decoded components
  */
 export function decodeDisclosure(disclosure) {
-  const decoded = cbor.decode(disclosure);
+  const decoded = cbor.decode(disclosure, cborDecodeOptions);
   
   if (!Array.isArray(decoded)) {
     throw new Error('Invalid disclosure format: expected array');
@@ -383,5 +393,185 @@ export function decodeDisclosure(disclosure) {
   }
 
   throw new Error(`Invalid disclosure format: unexpected length ${decoded.length}`);
+}
+
+/**
+ * Compares two Uint8Arrays for equality
+ * 
+ * @param {Uint8Array} a - First array
+ * @param {Uint8Array} b - Second array
+ * @returns {boolean} True if arrays are equal
+ */
+function bytesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Builds a lookup map from disclosure hash to decoded disclosure
+ * 
+ * @param {Uint8Array[]} disclosures - Array of CBOR-encoded disclosures
+ * @param {string} [hashAlg='sha256'] - Hash algorithm used
+ * @returns {Map<string, {hash: Uint8Array, decoded: object}>} Lookup map keyed by hex hash
+ */
+function buildDisclosureLookup(disclosures, hashAlg = 'sha256') {
+  const lookup = new Map();
+  for (const disclosure of disclosures) {
+    const hash = hashDisclosure(disclosure, hashAlg);
+    const decoded = decodeDisclosure(disclosure);
+    // Use hex string as key for easy Map lookup
+    const hexKey = Buffer.from(hash).toString('hex');
+    lookup.set(hexKey, { hash, decoded, disclosure });
+  }
+  return lookup;
+}
+
+/**
+ * Reconstructs claims from a redacted map and disclosures.
+ * 
+ * This is the inverse of processToBeRedacted. It takes a redacted claims map
+ * (with simple(59) keys containing hashes) and the disclosures, then
+ * reconstructs the original claims by matching disclosure hashes.
+ * 
+ * @param {Map} redactedClaims - The redacted claims map
+ * @param {Uint8Array[]} disclosures - Array of CBOR-encoded disclosures to apply
+ * @param {string} [hashAlg='sha256'] - Hash algorithm used
+ * @returns {{claims: Map, redactedKeys: Uint8Array[]}} Reconstructed claims and remaining redacted key hashes
+ */
+export function reconstructClaims(redactedClaims, disclosures, hashAlg = 'sha256') {
+  const lookup = buildDisclosureLookup(disclosures, hashAlg);
+  return reconstructClaimsInternal(redactedClaims, lookup);
+}
+
+/**
+ * Internal recursive implementation for reconstructClaims
+ */
+function reconstructClaimsInternal(redactedClaims, lookup) {
+  const resultClaims = new Map();
+  const remainingRedactedHashes = [];
+
+  // First, find and process the redacted keys array (simple(59) key)
+  let redactedKeyHashes = null;
+  for (const [key, value] of redactedClaims) {
+    if (isRedactedKeysKey(key)) {
+      redactedKeyHashes = value;
+    } else {
+      // Copy non-redacted-keys entries, recursively processing nested structures
+      if (value instanceof Map) {
+        const nested = reconstructClaimsInternal(value, lookup);
+        resultClaims.set(key, nested.claims);
+        remainingRedactedHashes.push(...nested.redactedKeys);
+      } else if (Array.isArray(value)) {
+        const nested = reconstructArrayInternal(value, lookup);
+        resultClaims.set(key, nested.array);
+        remainingRedactedHashes.push(...nested.redactedElements);
+      } else {
+        resultClaims.set(key, value);
+      }
+    }
+  }
+
+  // Process redacted key hashes - match against disclosures
+  if (redactedKeyHashes) {
+    for (const hash of redactedKeyHashes) {
+      const hashBytes = hash instanceof Uint8Array ? hash : new Uint8Array(hash);
+      const hexKey = Buffer.from(hashBytes).toString('hex');
+      const entry = lookup.get(hexKey);
+      
+      if (entry && entry.decoded.claimName !== undefined) {
+        // Found matching disclosure - restore the claim
+        let restoredValue = entry.decoded.value;
+        
+        // Recursively process restored values if they are maps/arrays
+        if (restoredValue instanceof Map) {
+          const nested = reconstructClaimsInternal(restoredValue, lookup);
+          restoredValue = nested.claims;
+          remainingRedactedHashes.push(...nested.redactedKeys);
+        } else if (Array.isArray(restoredValue)) {
+          const nested = reconstructArrayInternal(restoredValue, lookup);
+          restoredValue = nested.array;
+          remainingRedactedHashes.push(...nested.redactedElements);
+        }
+        
+        resultClaims.set(entry.decoded.claimName, restoredValue);
+      } else {
+        // No matching disclosure - keep as redacted
+        remainingRedactedHashes.push(hashBytes);
+      }
+    }
+  }
+
+  return { claims: resultClaims, redactedKeys: remainingRedactedHashes };
+}
+
+/**
+ * Reconstructs an array from redacted elements and disclosures.
+ * 
+ * @param {Array} redactedArray - Array containing redacted claim elements (tag 60)
+ * @param {Uint8Array[]} disclosures - Array of CBOR-encoded disclosures
+ * @param {string} [hashAlg='sha256'] - Hash algorithm used
+ * @returns {{array: Array, redactedElements: Uint8Array[]}} Reconstructed array and remaining redacted hashes
+ */
+export function reconstructArray(redactedArray, disclosures, hashAlg = 'sha256') {
+  const lookup = buildDisclosureLookup(disclosures, hashAlg);
+  return reconstructArrayInternal(redactedArray, lookup);
+}
+
+/**
+ * Internal recursive implementation for reconstructArray
+ */
+function reconstructArrayInternal(redactedArray, lookup) {
+  const resultArray = [];
+  const remainingRedactedHashes = [];
+
+  for (const element of redactedArray) {
+    if (isRedactedClaimElement(element)) {
+      // This is a redacted element - try to find matching disclosure
+      const hashBytes = element.contents instanceof Uint8Array 
+        ? element.contents 
+        : new Uint8Array(element.contents);
+      const hexKey = Buffer.from(hashBytes).toString('hex');
+      const entry = lookup.get(hexKey);
+      
+      if (entry && entry.decoded.claimName === undefined && !entry.decoded.isDecoy) {
+        // Found matching array element disclosure - restore the value
+        let restoredValue = entry.decoded.value;
+        
+        // Recursively process restored values
+        if (restoredValue instanceof Map) {
+          const nested = reconstructClaimsInternal(restoredValue, lookup);
+          restoredValue = nested.claims;
+          remainingRedactedHashes.push(...nested.redactedKeys);
+        } else if (Array.isArray(restoredValue)) {
+          const nested = reconstructArrayInternal(restoredValue, lookup);
+          restoredValue = nested.array;
+          remainingRedactedHashes.push(...nested.redactedElements);
+        }
+        
+        resultArray.push(restoredValue);
+      } else {
+        // No matching disclosure (or is decoy) - keep as redacted
+        resultArray.push(element);
+        remainingRedactedHashes.push(hashBytes);
+      }
+    } else if (element instanceof Map) {
+      // Recursively process nested maps
+      const nested = reconstructClaimsInternal(element, lookup);
+      resultArray.push(nested.claims);
+      remainingRedactedHashes.push(...nested.redactedKeys);
+    } else if (Array.isArray(element)) {
+      // Recursively process nested arrays
+      const nested = reconstructArrayInternal(element, lookup);
+      resultArray.push(nested.array);
+      remainingRedactedHashes.push(...nested.redactedElements);
+    } else {
+      resultArray.push(element);
+    }
+  }
+
+  return { array: resultArray, redactedElements: remainingRedactedHashes };
 }
 

@@ -31,6 +31,13 @@ import {
   // Processing utilities
   processToBeRedacted,
   processArrayToBeRedacted,
+  
+  // Reconstruction utilities
+  reconstructClaims,
+  reconstructArray,
+  
+  // CBOR options
+  cborDecodeOptions,
 } from '../src/sd-cwt.js';
 
 describe('SD-CWT Tags and Simple Values', () => {
@@ -638,6 +645,561 @@ describe('Example from SD-CWT spec', () => {
     // And decoded back
     const decoded = cbor.decode(encoded);
     assert.ok(decoded instanceof Map);
+  });
+
+});
+
+describe('reconstructClaims()', () => {
+
+  it('should reconstruct a simple redacted map claim', () => {
+    const claims = new Map([
+      [toBeRedacted(500), 'ABCD-123456'],
+      [501, true],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redactedClaims, disclosures);
+    
+    // Should have reconstructed the redacted claim
+    assert.strictEqual(reconstructed.get(500), 'ABCD-123456');
+    assert.strictEqual(reconstructed.get(501), true);
+    
+    // Should not have the redacted keys array anymore
+    let hasRedactedKeysKey = false;
+    for (const key of reconstructed.keys()) {
+      if (isRedactedKeysKey(key)) {
+        hasRedactedKeysKey = true;
+      }
+    }
+    assert.strictEqual(hasRedactedKeysKey, false);
+  });
+
+  it('should reconstruct multiple redacted claims', () => {
+    const claims = new Map([
+      [toBeRedacted(500), 'value1'],
+      [toBeRedacted(501), 'value2'],
+      [502, 'public'],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redactedClaims, disclosures);
+    
+    assert.strictEqual(reconstructed.get(500), 'value1');
+    assert.strictEqual(reconstructed.get(501), 'value2');
+    assert.strictEqual(reconstructed.get(502), 'public');
+  });
+
+  it('should handle partial disclosure (selective disclosure)', () => {
+    const claims = new Map([
+      [toBeRedacted(500), 'secret1'],
+      [toBeRedacted(501), 'secret2'],
+      [502, 'public'],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    
+    // Only provide the first disclosure (partial selective disclosure)
+    const partialDisclosures = [disclosures[0]];
+    const { claims: reconstructed, redactedKeys } = reconstructClaims(redactedClaims, partialDisclosures);
+    
+    // One claim should be reconstructed, one should remain redacted
+    assert.strictEqual(reconstructed.get(502), 'public');
+    
+    // Should have one remaining redacted key hash
+    assert.strictEqual(redactedKeys.length, 1);
+  });
+
+  it('should reconstruct nested maps', () => {
+    const innerMap = new Map([
+      [toBeRedacted('region'), 'ca'],
+      ['country', 'us'],
+    ]);
+    
+    const claims = new Map([
+      [503, innerMap],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redactedClaims, disclosures);
+    
+    const location = reconstructed.get(503);
+    assert.ok(location instanceof Map);
+    assert.strictEqual(location.get('region'), 'ca');
+    assert.strictEqual(location.get('country'), 'us');
+  });
+
+  it('should handle claims with no redacted keys', () => {
+    const claims = new Map([
+      [500, 'public1'],
+      [501, 'public2'],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redactedClaims, disclosures);
+    
+    assert.strictEqual(reconstructed.get(500), 'public1');
+    assert.strictEqual(reconstructed.get(501), 'public2');
+    assert.strictEqual(disclosures.length, 0);
+  });
+
+  it('should handle decoys (no reconstruction possible)', () => {
+    const claims = new Map([
+      [toBeDecoy(2), null],
+      [500, 'public'],
+    ]);
+    
+    const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed, redactedKeys } = reconstructClaims(redactedClaims, disclosures);
+    
+    assert.strictEqual(reconstructed.get(500), 'public');
+    // Decoys should remain as redacted (no disclosure to match)
+    assert.strictEqual(redactedKeys.length, 2);
+  });
+
+});
+
+describe('reconstructArray()', () => {
+
+  it('should reconstruct a simple redacted array', () => {
+    const array = [
+      toBeRedacted(1549560720),
+      toBeRedacted(1612345678),
+      1674004740, // non-redacted
+    ];
+    
+    const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+    const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+    
+    assert.strictEqual(reconstructed.length, 3);
+    assert.strictEqual(reconstructed[0], 1549560720);
+    assert.strictEqual(reconstructed[1], 1612345678);
+    assert.strictEqual(reconstructed[2], 1674004740);
+  });
+
+  it('should handle partial array disclosure', () => {
+    const array = [
+      toBeRedacted('secret1'),
+      toBeRedacted('secret2'),
+      'public',
+    ];
+    
+    const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+    
+    // Only provide first disclosure
+    const partialDisclosures = [disclosures[0]];
+    const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, partialDisclosures);
+    
+    assert.strictEqual(reconstructed.length, 3);
+    assert.strictEqual(reconstructed[0], 'secret1');
+    assert.ok(isRedactedClaimElement(reconstructed[1])); // Still redacted
+    assert.strictEqual(reconstructed[2], 'public');
+    assert.strictEqual(redactedElements.length, 1);
+  });
+
+  it('should handle array decoys', () => {
+    const array = [
+      toBeDecoy(2),
+      'public',
+    ];
+    
+    const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+    const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, disclosures);
+    
+    assert.strictEqual(reconstructed.length, 3); // 2 decoys + 1 public
+    // Decoys remain as redacted elements
+    assert.ok(isRedactedClaimElement(reconstructed[0]));
+    assert.ok(isRedactedClaimElement(reconstructed[1]));
+    assert.strictEqual(reconstructed[2], 'public');
+    assert.strictEqual(redactedElements.length, 2);
+  });
+
+  it('should reconstruct nested arrays', () => {
+    const innerArray = [toBeRedacted('inner-secret'), 'inner-public'];
+    const outerArray = ['outer-public', innerArray];
+    
+    const { array: redactedArray, disclosures } = processArrayToBeRedacted(outerArray);
+    const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+    
+    assert.strictEqual(reconstructed[0], 'outer-public');
+    assert.ok(Array.isArray(reconstructed[1]));
+    assert.strictEqual(reconstructed[1][0], 'inner-secret');
+    assert.strictEqual(reconstructed[1][1], 'inner-public');
+  });
+
+});
+
+describe('Roundtrip: Redaction → Reconstruction', () => {
+
+  it('should roundtrip simple map claims', () => {
+    const original = new Map([
+      [toBeRedacted(500), 'secret-license'],
+      [501, true],
+      [502, 42],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    // Verify roundtrip
+    assert.strictEqual(reconstructed.get(500), 'secret-license');
+    assert.strictEqual(reconstructed.get(501), true);
+    assert.strictEqual(reconstructed.get(502), 42);
+  });
+
+  it('should roundtrip array elements', () => {
+    const original = [
+      toBeRedacted('secret1'),
+      'public',
+      toBeRedacted('secret2'),
+    ];
+    
+    const { array: redacted, disclosures } = processArrayToBeRedacted(original);
+    const { array: reconstructed } = reconstructArray(redacted, disclosures);
+    
+    assert.strictEqual(reconstructed[0], 'secret1');
+    assert.strictEqual(reconstructed[1], 'public');
+    assert.strictEqual(reconstructed[2], 'secret2');
+  });
+
+  it('should roundtrip complex nested structures', () => {
+    const inspectionDates = [
+      toBeRedacted(1549560720),
+      toBeRedacted(1612445940),
+      1674004740,
+    ];
+    
+    const inspectionLocation = new Map([
+      ['country', 'us'],
+      [toBeRedacted('region'), 'ca'],
+      [toBeRedacted('postal_code'), '90210'],
+    ]);
+    
+    const original = new Map([
+      [500, true],
+      [502, inspectionDates],
+      [503, inspectionLocation],
+      [toBeRedacted(504), 'ABCD-123456'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    
+    // Verify redacted structure has correct shape
+    assert.strictEqual(disclosures.length, 5);
+    
+    // Reconstruct with all disclosures
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    // Verify reconstructed values
+    assert.strictEqual(reconstructed.get(500), true);
+    assert.strictEqual(reconstructed.get(504), 'ABCD-123456');
+    
+    const dates = reconstructed.get(502);
+    assert.strictEqual(dates[0], 1549560720);
+    assert.strictEqual(dates[1], 1612445940);
+    assert.strictEqual(dates[2], 1674004740);
+    
+    const location = reconstructed.get(503);
+    assert.strictEqual(location.get('country'), 'us');
+    assert.strictEqual(location.get('region'), 'ca');
+    assert.strictEqual(location.get('postal_code'), '90210');
+  });
+
+  it('should handle selective disclosure in complex structures', () => {
+    const inspectionDates = [
+      toBeRedacted(1549560720),
+      toBeRedacted(1612445940),
+      1674004740,
+    ];
+    
+    const original = new Map([
+      [500, true],
+      [502, inspectionDates],
+      [toBeRedacted(504), 'ABCD-123456'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    
+    // Only disclose the license number, not the dates
+    // Find the disclosure for claim 504
+    const licenseDisclosure = disclosures.find(d => {
+      const decoded = decodeDisclosure(d);
+      return decoded.claimName === 504;
+    });
+    
+    assert.ok(licenseDisclosure, 'Should find license disclosure');
+    
+    const { claims: reconstructed, redactedKeys } = reconstructClaims(redacted, [licenseDisclosure]);
+    
+    // License should be disclosed
+    assert.strictEqual(reconstructed.get(504), 'ABCD-123456');
+    assert.strictEqual(reconstructed.get(500), true);
+    
+    // Dates should remain redacted
+    const dates = reconstructed.get(502);
+    assert.ok(isRedactedClaimElement(dates[0]));
+    assert.ok(isRedactedClaimElement(dates[1]));
+    assert.strictEqual(dates[2], 1674004740);
+  });
+
+  it('should survive CBOR encode/decode cycle', () => {
+    const original = new Map([
+      [toBeRedacted(500), 'secret-value'],
+      [501, 'public-value'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    
+    // Encode/decode the redacted claims (simulating transmission)
+    const encoded = cbor.encode(redacted);
+    const decoded = cbor.decode(encoded);
+    
+    // Reconstruct from decoded claims
+    const { claims: reconstructed } = reconstructClaims(decoded, disclosures);
+    
+    assert.strictEqual(reconstructed.get(500), 'secret-value');
+    assert.strictEqual(reconstructed.get(501), 'public-value');
+  });
+
+  it('should handle string claim keys', () => {
+    const original = new Map([
+      [toBeRedacted('secret_key'), 'secret-value'],
+      ['public_key', 'public-value'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    assert.strictEqual(reconstructed.get('secret_key'), 'secret-value');
+    assert.strictEqual(reconstructed.get('public_key'), 'public-value');
+  });
+
+  it('should handle mixed integer and string keys', () => {
+    const original = new Map([
+      [toBeRedacted(1), 'int-secret'],
+      [toBeRedacted('str'), 'str-secret'],
+      [2, 'int-public'],
+      ['pub', 'str-public'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    assert.strictEqual(reconstructed.get(1), 'int-secret');
+    assert.strictEqual(reconstructed.get('str'), 'str-secret');
+    assert.strictEqual(reconstructed.get(2), 'int-public');
+    assert.strictEqual(reconstructed.get('pub'), 'str-public');
+  });
+
+  it('should handle deeply nested structures', () => {
+    const level3 = new Map([
+      [toBeRedacted('deep'), 'deep-secret'],
+      ['visible', 'deep-public'],
+    ]);
+    
+    const level2 = new Map([
+      ['nested', level3],
+      [toBeRedacted('mid'), 'mid-secret'],
+    ]);
+    
+    const original = new Map([
+      ['outer', level2],
+      [toBeRedacted('top'), 'top-secret'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(original);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    assert.strictEqual(reconstructed.get('top'), 'top-secret');
+    
+    const l2 = reconstructed.get('outer');
+    assert.strictEqual(l2.get('mid'), 'mid-secret');
+    
+    const l3 = l2.get('nested');
+    assert.strictEqual(l3.get('deep'), 'deep-secret');
+    assert.strictEqual(l3.get('visible'), 'deep-public');
+  });
+
+});
+
+describe('CBOR Map Preservation', () => {
+
+  it('should decode CBOR maps as JavaScript Maps with cborDecodeOptions', () => {
+    const original = new Map([
+      ['key1', 'value1'],
+      ['key2', 42],
+      [1, 'numeric-key'],
+    ]);
+    
+    const encoded = cbor.encode(original);
+    const decoded = cbor.decode(encoded, cborDecodeOptions);
+    
+    assert.ok(decoded instanceof Map, 'Decoded value should be a Map');
+    assert.strictEqual(decoded.get('key1'), 'value1');
+    assert.strictEqual(decoded.get('key2'), 42);
+    assert.strictEqual(decoded.get(1), 'numeric-key');
+  });
+
+  it('should preserve nested Maps through CBOR roundtrip', () => {
+    const innerMap = new Map([['nested', 'value']]);
+    const original = new Map([
+      ['outer', innerMap],
+    ]);
+    
+    const encoded = cbor.encode(original);
+    const decoded = cbor.decode(encoded, cborDecodeOptions);
+    
+    assert.ok(decoded instanceof Map);
+    const inner = decoded.get('outer');
+    assert.ok(inner instanceof Map, 'Nested value should be a Map');
+    assert.strictEqual(inner.get('nested'), 'value');
+  });
+
+  it('should preserve Maps inside arrays through CBOR roundtrip', () => {
+    const mapInArray = new Map([['key', 'value']]);
+    const original = ['before', mapInArray, 'after'];
+    
+    const encoded = cbor.encode(original);
+    const decoded = cbor.decode(encoded, cborDecodeOptions);
+    
+    assert.ok(Array.isArray(decoded));
+    assert.strictEqual(decoded[0], 'before');
+    assert.ok(decoded[1] instanceof Map, 'Map in array should be a Map');
+    assert.strictEqual(decoded[1].get('key'), 'value');
+    assert.strictEqual(decoded[2], 'after');
+  });
+
+  it('should preserve Maps in disclosure values', () => {
+    const nestedMap = new Map([
+      ['field1', 'sensitive1'],
+      ['field2', 'sensitive2'],
+    ]);
+    
+    const salt = generateSalt();
+    const disclosure = createSaltedDisclosure(salt, nestedMap, 'complexClaim');
+    const decoded = decodeDisclosure(disclosure);
+    
+    assert.ok(decoded.value instanceof Map, 'Disclosure value should be a Map');
+    assert.strictEqual(decoded.value.get('field1'), 'sensitive1');
+    assert.strictEqual(decoded.value.get('field2'), 'sensitive2');
+  });
+
+});
+
+describe('Isolation Tests: Redaction and Reconstruction without Signing', () => {
+
+  it('should verify that disclosure hash matches redacted key hash', () => {
+    const claims = new Map([
+      [toBeRedacted(500), 'test-value'],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(claims);
+    
+    // Get the hash from the redacted keys array
+    let redactedHash = null;
+    for (const [key, value] of redacted) {
+      if (isRedactedKeysKey(key)) {
+        redactedHash = value[0];
+      }
+    }
+    assert.ok(redactedHash, 'Should have redacted hash');
+    
+    // Compute hash of the disclosure
+    const disclosureHash = hashDisclosure(disclosures[0]);
+    
+    // They should match
+    assert.deepStrictEqual(new Uint8Array(redactedHash), disclosureHash);
+  });
+
+  it('should verify that array element disclosure hash matches tag contents', () => {
+    const array = [toBeRedacted('secret-element')];
+    
+    const { array: redacted, disclosures } = processArrayToBeRedacted(array);
+    
+    // Get the hash from the redacted element tag
+    const redactedElement = redacted[0];
+    assert.ok(isRedactedClaimElement(redactedElement));
+    const redactedHash = redactedElement.contents;
+    
+    // Compute hash of the disclosure
+    const disclosureHash = hashDisclosure(disclosures[0]);
+    
+    // They should match
+    assert.deepStrictEqual(new Uint8Array(redactedHash), disclosureHash);
+  });
+
+  it('should fail reconstruction with wrong disclosure', () => {
+    const claims = new Map([
+      [toBeRedacted(500), 'correct-value'],
+    ]);
+    
+    const { claims: redacted } = processToBeRedacted(claims);
+    
+    // Create a wrong disclosure with different salt
+    const wrongSalt = new Uint8Array(16).fill(0xFF);
+    const wrongDisclosure = createSaltedDisclosure(wrongSalt, 'wrong-value', 500);
+    
+    const { claims: reconstructed, redactedKeys } = reconstructClaims(redacted, [wrongDisclosure]);
+    
+    // Should not have reconstructed the claim (hash mismatch)
+    assert.strictEqual(reconstructed.has(500), false);
+    assert.strictEqual(redactedKeys.length, 1);
+  });
+
+  it('should handle empty claims map', () => {
+    const claims = new Map();
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    assert.strictEqual(redacted.size, 0);
+    assert.strictEqual(disclosures.length, 0);
+    assert.strictEqual(reconstructed.size, 0);
+  });
+
+  it('should handle empty array', () => {
+    const array = [];
+    
+    const { array: redacted, disclosures } = processArrayToBeRedacted(array);
+    const { array: reconstructed } = reconstructArray(redacted, disclosures);
+    
+    assert.strictEqual(redacted.length, 0);
+    assert.strictEqual(disclosures.length, 0);
+    assert.strictEqual(reconstructed.length, 0);
+  });
+
+  it('should reconstruct complex values (maps as claim values)', () => {
+    const nestedValue = new Map([
+      ['inner1', 'value1'],
+      ['inner2', 42],
+    ]);
+    
+    const claims = new Map([
+      [toBeRedacted(500), nestedValue],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    const restored = reconstructed.get(500);
+    // With preferMap: true, CBOR maps are decoded as JavaScript Maps
+    assert.ok(restored instanceof Map, 'Should be a Map instance');
+    assert.strictEqual(restored.get('inner1'), 'value1');
+    assert.strictEqual(restored.get('inner2'), 42);
+  });
+
+  it('should reconstruct complex values (arrays as claim values)', () => {
+    const arrayValue = [1, 2, 3, 'four'];
+    
+    const claims = new Map([
+      [toBeRedacted(500), arrayValue],
+    ]);
+    
+    const { claims: redacted, disclosures } = processToBeRedacted(claims);
+    const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+    
+    const restored = reconstructed.get(500);
+    assert.ok(Array.isArray(restored));
+    assert.deepStrictEqual(restored, [1, 2, 3, 'four']);
   });
 
 });
