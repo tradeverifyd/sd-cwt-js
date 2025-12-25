@@ -1621,6 +1621,9 @@ describe('Decoys at All Nesting Levels', () => {
 });
 
 describe('Validation: validateClaimsClean and assertClaimsClean', () => {
+  // Per spec Section 14: ToBeRedacted tag (58) is ONLY for pre-issuance
+  // Per spec Section 9, Step 7: Validated Disclosed Claims Set has "no claims marked for redaction"
+  // Per spec Terminology: Validated set "omits all undisclosed instances" of Redacted Claims
 
   describe('validateClaimsClean', () => {
     it('should pass for clean claims with no SD-CWT artifacts', () => {
@@ -1635,7 +1638,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.strictEqual(result.issues.length, 0);
     });
 
-    it('should fail for claims with ToBeRedacted tag', () => {
+    it('should fail for claims with ToBeRedacted tag (pre-issuance only per spec Section 14)', () => {
       const claims = new Map([
         [toBeRedacted('key'), 'value'],
       ]);
@@ -1645,7 +1648,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.issues.some(i => i.includes('ToBeRedacted')));
     });
 
-    it('should fail for claims with ToBeDecoy tag', () => {
+    it('should fail for claims with ToBeDecoy tag (pre-issuance only)', () => {
       const claims = new Map([
         [toBeDecoy(1), null],
       ]);
@@ -1655,7 +1658,8 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.issues.some(i => i.includes('ToBeDecoy')));
     });
 
-    it('should fail for claims with RedactedClaimElement (when allowRedacted=false)', () => {
+    it('should fail for claims with RedactedClaimElement when checking for Validated Disclosed Claims Set', () => {
+      // Per spec: Validated Disclosed Claims Set "omits" undisclosed elements
       const hash = new Uint8Array(32).fill(0xAB);
       const claims = new Map([
         ['items', [redactedClaimElement(hash), 'public']],
@@ -1666,7 +1670,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.issues.some(i => i.includes('RedactedClaimElement')));
     });
 
-    it('should fail for claims with redacted keys (simple 59)', () => {
+    it('should fail for claims with redacted keys (simple 59) when checking for Validated Disclosed Claims Set', () => {
       const hash = new Uint8Array(32).fill(0xCD);
       const claims = new Map([
         ['visible', 'value'],
@@ -1678,7 +1682,9 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.issues.some(i => i.includes('Redacted keys')));
     });
 
-    it('should pass with allowRedacted=true when redacted elements exist', () => {
+    it('should pass with allowRedacted=true for Presented Disclosed Claims Set (partial disclosure)', () => {
+      // Per spec Appendix F Note: "holder intentionally did not disclose a claim, or decoy"
+      // allowRedacted=true is for inspecting partial disclosures
       const hash = new Uint8Array(32).fill(0xAB);
       const claims = new Map([
         ['items', [redactedClaimElement(hash)]],
@@ -1689,7 +1695,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.isClean);
     });
 
-    it('should detect artifacts in deeply nested structures', () => {
+    it('should detect pre-issuance artifacts in deeply nested structures', () => {
       const level3 = new Map([
         [toBeRedacted('deep'), 'value'],
       ]);
@@ -1701,7 +1707,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.issues.some(i => i.includes('ToBeRedacted')));
     });
 
-    it('should detect artifacts in arrays', () => {
+    it('should detect pre-issuance artifacts in arrays', () => {
       const claims = new Map([
         ['items', [toBeRedacted('secret'), 'public']],
       ]);
@@ -1710,7 +1716,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.strictEqual(result.isClean, false);
     });
 
-    it('should detect artifacts in nested CBOR tags', () => {
+    it('should detect pre-issuance artifacts in nested CBOR tags', () => {
       const innerWithArtifact = new Map([
         [toBeRedacted('key'), 'value'],
       ]);
@@ -1721,7 +1727,8 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.strictEqual(result.isClean, false);
     });
 
-    it('should pass for properly processed and fully reconstructed claims', () => {
+    it('should pass for properly processed and fully reconstructed claims (Validated Disclosed Claims Set)', () => {
+      // Per spec Section 9, Step 7: "CWT Claims Set with no claims marked for redaction"
       const original = new Map([
         [toBeRedacted(500), 'secret'],
         [501, 'public'],
@@ -1734,8 +1741,8 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.ok(result.isClean, `Expected clean but got issues: ${result.issues.join(', ')}`);
     });
 
-    it('should enforce depth limit in strict mode', () => {
-      // Build very deep structure
+    it('should enforce depth limit in strict mode (per spec Section 6.5)', () => {
+      // Per spec: "Selective disclosure of deeply nested structures (exceeding depth 16) is NOT RECOMMENDED"
       let current = new Map([['val', 'x']]);
       for (let i = 0; i < 20; i++) {
         current = new Map([['n', current]]);
@@ -1753,7 +1760,7 @@ describe('Validation: validateClaimsClean and assertClaimsClean', () => {
       assert.doesNotThrow(() => assertClaimsClean(claims));
     });
 
-    it('should throw for claims with artifacts', () => {
+    it('should throw for claims with pre-issuance artifacts', () => {
       const claims = new Map([
         [toBeRedacted('key'), 'value'],
       ]);

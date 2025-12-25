@@ -711,10 +711,22 @@ describe('SD-CWT High-Level API', () => {
 });
 
 describe('API: Strict Depth and Validation', () => {
+  // Per spec Section 6.5: "Selective disclosure of deeply nested structures 
+  // (exceeding a depth of 16 levels), is NOT RECOMMENDED"
+  //
+  // Per spec Section 14: ToBeRedacted tag is for pre-issuance only
+  //
+  // Per spec Section 9, Step 7: "Validated Disclosed Claims Set is now a 
+  // CWT Claims Set with no claims marked for redaction"
+  //
+  // Note: The spec allows partial disclosure (Holder chooses what to reveal).
+  // The `requireClean` option is an extension for use cases that need
+  // all claims disclosed (no redacted elements remaining).
+
   const keyPair = generateKeyPair();
 
   describe('MAX_DEPTH constant export', () => {
-    it('should export MAX_DEPTH as 16', () => {
+    it('should export MAX_DEPTH as 16 per spec Section 6.5', () => {
       assert.strictEqual(MAX_DEPTH, 16);
     });
   });
