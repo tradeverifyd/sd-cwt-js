@@ -17,7 +17,21 @@ import * as sdCwt from './sd-cwt.js';
 
 // Re-export key utilities
 export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean, ClaimKey, MediaType, HeaderParam } from './sd-cwt.js';
-export { generateKeyPair, Algorithm } from './cose-sign1.js';
+export { 
+  generateKeyPair, 
+  Algorithm, 
+  CoseKeyParam, 
+  CoseKeyType, 
+  CoseCurve, 
+  isCoseKey, 
+  coseKeyToInternal, 
+  internalToCoseKey, 
+  getAlgorithmFromCoseKey,
+  serializeCoseKey,
+  deserializeCoseKey,
+  coseKeyToHex,
+  coseKeyFromHex,
+} from './cose-sign1.js';
 
 /**
  * SD-CWT Issuer API

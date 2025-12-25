@@ -40,6 +40,9 @@ var SDCWT = (() => {
   __export(browser_exports, {
     Algorithm: () => Algorithm,
     ClaimKey: () => ClaimKey,
+    CoseCurve: () => CoseCurve,
+    CoseKeyParam: () => CoseKeyParam,
+    CoseKeyType: () => CoseKeyType,
     EDN: () => EDN,
     HeaderParam: () => HeaderParam2,
     Hex: () => Hex,
@@ -51,10 +54,18 @@ var SDCWT = (() => {
     Verifier: () => Verifier,
     assertClaimsClean: () => assertClaimsClean,
     cbor: () => lib_exports,
+    coseKeyFromHex: () => coseKeyFromHex,
+    coseKeyToHex: () => coseKeyToHex,
+    coseKeyToInternal: () => coseKeyToInternal,
     coseSign1: () => cose_sign1_exports,
+    deserializeCoseKey: () => deserializeCoseKey,
     formatClaims: () => formatClaims,
     generateKeyPair: () => generateKeyPair2,
+    getAlgorithmFromCoseKey: () => getAlgorithmFromCoseKey,
+    internalToCoseKey: () => internalToCoseKey,
+    isCoseKey: () => isCoseKey,
     sdCwt: () => sd_cwt_exports,
+    serializeCoseKey: () => serializeCoseKey,
     toBeDecoy: () => toBeDecoy,
     toBeRedacted: () => toBeRedacted,
     validateClaimsClean: () => validateClaimsClean
@@ -1846,9 +1857,20 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     Alg: () => Alg,
     Algorithm: () => Algorithm,
     COSE_Sign1_Tag: () => COSE_Sign1_Tag,
+    CoseCurve: () => CoseCurve,
+    CoseKeyParam: () => CoseKeyParam,
+    CoseKeyType: () => CoseKeyType,
     HeaderParam: () => HeaderParam,
+    coseKeyFromHex: () => coseKeyFromHex,
+    coseKeyToHex: () => coseKeyToHex,
+    coseKeyToInternal: () => coseKeyToInternal,
+    deserializeCoseKey: () => deserializeCoseKey,
     generateKeyPair: () => generateKeyPair2,
+    getAlgorithmFromCoseKey: () => getAlgorithmFromCoseKey,
     getHeaders: () => getHeaders,
+    internalToCoseKey: () => internalToCoseKey,
+    isCoseKey: () => isCoseKey,
+    serializeCoseKey: () => serializeCoseKey,
     sign: () => sign3,
     verify: () => verify3
   });
@@ -2044,7 +2066,16 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     webcrypto.getRandomValues(bytes);
     return bytes;
   }
-  async function generateKeyPairAsync(namedCurve) {
+  async function generateKeyPairAsync(algorithmOrCurve) {
+    const curveMap = {
+      "ES256": "P-256",
+      "ES384": "P-384",
+      "ES512": "P-521",
+      "P-256": "P-256",
+      "P-384": "P-384",
+      "P-521": "P-521"
+    };
+    const namedCurve = curveMap[algorithmOrCurve] || algorithmOrCurve;
     const keyPair = await webcrypto.subtle.generateKey(
       {
         name: "ECDSA",
@@ -2085,8 +2116,9 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     };
   }
   function createPublicKey(options) {
+    const { kty, crv, x: x4, y: y6 } = options.key;
     return {
-      _jwk: options.key,
+      _jwk: { kty, crv, x: x4, y: y6 },
       _type: "public"
     };
   }
@@ -2443,6 +2475,147 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     ES384: "ES384",
     ES512: "ES512"
   };
+  var CoseKeyParam = {
+    Kty: 1,
+    // Key Type
+    Kid: 2,
+    // Key ID
+    Alg: 3,
+    // Key Algorithm
+    KeyOps: 4,
+    // Key Operations
+    BaseIV: 5,
+    // Base IV
+    // EC2 specific parameters
+    Crv: -1,
+    // Curve (EC2)
+    X: -2,
+    // x coordinate
+    Y: -3,
+    // y coordinate
+    D: -4
+    // Private key d
+  };
+  var CoseKeyType = {
+    OKP: 1,
+    // Octet Key Pair (EdDSA)
+    EC2: 2
+    // Elliptic Curve with x, y coordinates
+  };
+  var CoseCurve = {
+    P256: 1,
+    // NIST P-256 (secp256r1)
+    P384: 2,
+    // NIST P-384 (secp384r1)
+    P521: 3
+    // NIST P-521 (secp521r1)
+  };
+  var AlgToCurve = {
+    "ES256": CoseCurve.P256,
+    "ES384": CoseCurve.P384,
+    "ES512": CoseCurve.P521
+  };
+  var CurveToAlg = {
+    [CoseCurve.P256]: "ES256",
+    [CoseCurve.P384]: "ES384",
+    [CoseCurve.P521]: "ES512"
+  };
+  function isCoseKey(key) {
+    if (key instanceof Map) {
+      return key.has(CoseKeyParam.Kty) || key.has(CoseKeyParam.X);
+    }
+    if (typeof key === "object" && key !== null) {
+      const keys = Object.keys(key);
+      return keys.some((k4) => k4 === "1" || k4 === "-2" || k4 === "-3");
+    }
+    return false;
+  }
+  function coseKeyToInternal(coseKey) {
+    let x4, y6, d5;
+    if (coseKey instanceof Map) {
+      x4 = coseKey.get(CoseKeyParam.X);
+      y6 = coseKey.get(CoseKeyParam.Y);
+      d5 = coseKey.get(CoseKeyParam.D);
+    } else if (typeof coseKey === "object") {
+      x4 = coseKey[CoseKeyParam.X] || coseKey["-2"];
+      y6 = coseKey[CoseKeyParam.Y] || coseKey["-3"];
+      d5 = coseKey[CoseKeyParam.D] || coseKey["-4"];
+    }
+    const result = {};
+    if (x4) result.x = toUint8Array(x4);
+    if (y6) result.y = toUint8Array(y6);
+    if (d5) result.d = toUint8Array(d5);
+    return result;
+  }
+  function internalToCoseKey(key, algorithm = "ES256") {
+    const coseKey = /* @__PURE__ */ new Map();
+    coseKey.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+    coseKey.set(CoseKeyParam.Crv, AlgToCurve[algorithm] || CoseCurve.P256);
+    if (key.x) coseKey.set(CoseKeyParam.X, toUint8Array(key.x));
+    if (key.y) coseKey.set(CoseKeyParam.Y, toUint8Array(key.y));
+    if (key.d) coseKey.set(CoseKeyParam.D, toUint8Array(key.d));
+    return coseKey;
+  }
+  function getAlgorithmFromCoseKey(coseKey) {
+    let crv;
+    if (coseKey instanceof Map) {
+      crv = coseKey.get(CoseKeyParam.Crv);
+    } else if (typeof coseKey === "object") {
+      crv = coseKey[CoseKeyParam.Crv] || coseKey["-1"];
+    }
+    return CurveToAlg[crv] || "ES256";
+  }
+  function serializeCoseKey(coseKey) {
+    if (!(coseKey instanceof Map)) {
+      throw new Error("COSE Key must be a Map");
+    }
+    return new Uint8Array(Q(coseKey));
+  }
+  function deserializeCoseKey(bytes) {
+    if (!bytes || bytes.length === 0) {
+      throw new Error("COSE Key bytes are required");
+    }
+    const decoded = l5(bytes, { preferMap: true });
+    if (!(decoded instanceof Map)) {
+      throw new Error("Invalid COSE Key: expected a CBOR map");
+    }
+    if (!decoded.has(CoseKeyParam.Kty)) {
+      throw new Error("Invalid COSE Key: missing kty (key type)");
+    }
+    return decoded;
+  }
+  function coseKeyToHex(coseKey) {
+    const bytes = serializeCoseKey(coseKey);
+    return Array.from(bytes).map((b4) => b4.toString(16).padStart(2, "0")).join("");
+  }
+  function coseKeyFromHex(hex) {
+    if (!hex || typeof hex !== "string") {
+      throw new Error("Hex string is required");
+    }
+    const clean = hex.replace(/\s/g, "");
+    const bytes = new Uint8Array(clean.length / 2);
+    for (let i3 = 0; i3 < bytes.length; i3++) {
+      bytes[i3] = parseInt(clean.substr(i3 * 2, 2), 16);
+    }
+    return deserializeCoseKey(bytes);
+  }
+  function normalizeKey(key) {
+    if (isCoseKey(key)) {
+      return {
+        key: coseKeyToInternal(key),
+        algorithm: getAlgorithmFromCoseKey(key)
+      };
+    }
+    return {
+      key: {
+        d: key.d ? toUint8Array(key.d) : void 0,
+        x: key.x ? toUint8Array(key.x) : void 0,
+        y: key.y ? toUint8Array(key.y) : void 0
+      },
+      algorithm: "ES256"
+      // Default for legacy format
+    };
+  }
   var AlgNameToId = {
     "ES256": Alg.ES256,
     "ES384": Alg.ES384,
@@ -2450,7 +2623,7 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
   };
   async function sign3(payload, signerKey, options = {}) {
     const {
-      algorithm = Algorithm.ES256,
+      algorithm: explicitAlgorithm,
       kid,
       protectedHeaders = {},
       unprotectedHeaders = {},
@@ -2460,8 +2633,10 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     if (!payload) {
       throw new Error("Payload is required");
     }
-    if (!signerKey || !signerKey.d || !signerKey.x || !signerKey.y) {
-      throw new Error("Signer key must include d, x, and y components");
+    const { key: internalKey, algorithm: detectedAlgorithm } = normalizeKey(signerKey);
+    const algorithm = explicitAlgorithm || detectedAlgorithm;
+    if (!internalKey || !internalKey.d || !internalKey.x || !internalKey.y) {
+      throw new Error("Signer key must include d, x, and y components (COSE Key params -4, -2, -3)");
     }
     const algId = AlgNameToId[algorithm];
     if (algId === void 0) {
@@ -2507,11 +2682,7 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     } else {
       payloadBytes = new Uint8Array(Buffer2.from(payload));
     }
-    const key = {
-      d: toUint8Array(signerKey.d),
-      x: toUint8Array(signerKey.x),
-      y: toUint8Array(signerKey.y)
-    };
+    const key = internalKey;
     const signed = await sign2({
       protectedHeader: protectedMap,
       unprotectedHeader: unprotectedMap,
@@ -2524,15 +2695,12 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
     if (!coseSign1) {
       throw new Error("COSE Sign1 message is required");
     }
-    if (!verifierKey || !verifierKey.x || !verifierKey.y) {
-      throw new Error("Verifier key must include x and y components");
+    const { key: internalKey } = normalizeKey(verifierKey);
+    if (!internalKey || !internalKey.x || !internalKey.y) {
+      throw new Error("Verifier key must include x and y components (COSE Key params -2, -3)");
     }
-    const key = {
-      x: toUint8Array(verifierKey.x),
-      y: toUint8Array(verifierKey.y)
-    };
     const messageBytes = toUint8Array(coseSign1);
-    const payload = await verify2(messageBytes, key);
+    const payload = await verify2(messageBytes, internalKey);
     return Buffer2.from(payload);
   }
   function getHeaders(coseSign1) {
@@ -2552,16 +2720,21 @@ ${O.repeat(r2.depth)}}` : r2.close = "}";
       throw new Error(`Unsupported algorithm: ${algorithm}`);
     }
     const { privateKey, publicKey } = generateKeyPair(algId);
+    const curve = AlgToCurve[algorithm];
+    const privateKeyMap = /* @__PURE__ */ new Map();
+    privateKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+    privateKeyMap.set(CoseKeyParam.Crv, curve);
+    privateKeyMap.set(CoseKeyParam.X, new Uint8Array(privateKey.x));
+    privateKeyMap.set(CoseKeyParam.Y, new Uint8Array(privateKey.y));
+    privateKeyMap.set(CoseKeyParam.D, new Uint8Array(privateKey.d));
+    const publicKeyMap = /* @__PURE__ */ new Map();
+    publicKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+    publicKeyMap.set(CoseKeyParam.Crv, curve);
+    publicKeyMap.set(CoseKeyParam.X, new Uint8Array(publicKey.x));
+    publicKeyMap.set(CoseKeyParam.Y, new Uint8Array(publicKey.y));
     return {
-      privateKey: {
-        d: Buffer2.from(privateKey.d),
-        x: Buffer2.from(privateKey.x),
-        y: Buffer2.from(privateKey.y)
-      },
-      publicKey: {
-        x: Buffer2.from(publicKey.x),
-        y: Buffer2.from(publicKey.y)
-      }
+      privateKey: privateKeyMap,
+      publicKey: publicKeyMap
     };
   }
   var HeaderLabels = {

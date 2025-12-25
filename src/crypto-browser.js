@@ -195,7 +195,19 @@ function randomBytes(size) {
 /**
  * Create ECDSA key pair
  */
-async function generateKeyPairAsync(namedCurve) {
+async function generateKeyPairAsync(algorithmOrCurve) {
+  // Map COSE/JOSE algorithm names to WebCrypto curve names
+  const curveMap = {
+    'ES256': 'P-256',
+    'ES384': 'P-384',
+    'ES512': 'P-521',
+    'P-256': 'P-256',
+    'P-384': 'P-384',
+    'P-521': 'P-521',
+  };
+  
+  const namedCurve = curveMap[algorithmOrCurve] || algorithmOrCurve;
+  
   const keyPair = await webcrypto.subtle.generateKey(
     {
       name: 'ECDSA',
@@ -366,8 +378,10 @@ function createPrivateKey(options) {
  * @returns {Object} - CryptoKey wrapper
  */
 function createPublicKey(options) {
+  // Extract only the public components (strip private 'd' if present)
+  const { kty, crv, x, y } = options.key;
   return {
-    _jwk: options.key,
+    _jwk: { kty, crv, x, y },
     _type: 'public',
   };
 }

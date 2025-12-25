@@ -1,42 +1,47 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import crypto from 'node:crypto';
-import { sign, verify, generateKeyPair, getHeaders, Algorithm } from '../src/cose-sign1.js';
+import { sign, verify, generateKeyPair, getHeaders, Algorithm, CoseKeyParam } from '../src/cose-sign1.js';
 
 describe('COSE Sign1 Module', () => {
 
   describe('generateKeyPair', () => {
-    it('should generate an ES256 key pair by default', () => {
+    it('should generate an ES256 key pair as COSE Keys by default', () => {
       const { privateKey, publicKey } = generateKeyPair();
       
-      assert.ok(privateKey.d, 'Private key should have d component');
-      assert.ok(privateKey.x, 'Private key should have x component');
-      assert.ok(privateKey.y, 'Private key should have y component');
-      assert.ok(publicKey.x, 'Public key should have x component');
-      assert.ok(publicKey.y, 'Public key should have y component');
+      // Keys should be Maps (COSE Key format)
+      assert.ok(privateKey instanceof Map, 'Private key should be a Map');
+      assert.ok(publicKey instanceof Map, 'Public key should be a Map');
+      
+      // Check COSE Key params using COSE Key labels
+      assert.ok(privateKey.has(CoseKeyParam.D), 'Private key should have d component');
+      assert.ok(privateKey.has(CoseKeyParam.X), 'Private key should have x component');
+      assert.ok(privateKey.has(CoseKeyParam.Y), 'Private key should have y component');
+      assert.ok(publicKey.has(CoseKeyParam.X), 'Public key should have x component');
+      assert.ok(publicKey.has(CoseKeyParam.Y), 'Public key should have y component');
       
       // P-256 keys should be 32 bytes
-      assert.strictEqual(privateKey.d.length, 32);
-      assert.strictEqual(privateKey.x.length, 32);
-      assert.strictEqual(privateKey.y.length, 32);
+      assert.strictEqual(privateKey.get(CoseKeyParam.D).length, 32);
+      assert.strictEqual(privateKey.get(CoseKeyParam.X).length, 32);
+      assert.strictEqual(privateKey.get(CoseKeyParam.Y).length, 32);
     });
 
-    it('should generate an ES384 key pair', () => {
+    it('should generate an ES384 key pair as COSE Keys', () => {
       const { privateKey, publicKey } = generateKeyPair(Algorithm.ES384);
       
       // P-384 keys should be 48 bytes
-      assert.strictEqual(privateKey.d.length, 48);
-      assert.strictEqual(publicKey.x.length, 48);
-      assert.strictEqual(publicKey.y.length, 48);
+      assert.strictEqual(privateKey.get(CoseKeyParam.D).length, 48);
+      assert.strictEqual(publicKey.get(CoseKeyParam.X).length, 48);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Y).length, 48);
     });
 
-    it('should generate an ES512 key pair', () => {
+    it('should generate an ES512 key pair as COSE Keys', () => {
       const { privateKey, publicKey } = generateKeyPair(Algorithm.ES512);
       
       // P-521 keys should be 66 bytes
-      assert.strictEqual(privateKey.d.length, 66);
-      assert.strictEqual(publicKey.x.length, 66);
-      assert.strictEqual(publicKey.y.length, 66);
+      assert.strictEqual(privateKey.get(CoseKeyParam.D).length, 66);
+      assert.strictEqual(publicKey.get(CoseKeyParam.X).length, 66);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Y).length, 66);
     });
 
     it('should throw for unsupported algorithm', () => {

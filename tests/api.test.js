@@ -18,30 +18,19 @@ import {
   assertClaimsClean,
   ClaimKey,
   MediaType,
+  CoseKeyParam,
 } from '../src/api.js';
 
 import crypto from 'node:crypto';
 
 /**
- * Helper to create a cnf claim with a holder's public key
- * Converts Buffer to Uint8Array for proper CBOR encoding
+ * Helper to create a cnf claim with a holder's public key (COSE Key format)
+ * @param {Map} holderPublicKey - COSE Key Map
  */
 function createCnfClaim(holderPublicKey) {
-  // Convert Buffer to Uint8Array (Buffer doesn't CBOR-encode correctly)
-  const xBytes = Buffer.isBuffer(holderPublicKey.x)
-    ? new Uint8Array(holderPublicKey.x.buffer, holderPublicKey.x.byteOffset, holderPublicKey.x.length)
-    : holderPublicKey.x;
-  const yBytes = Buffer.isBuffer(holderPublicKey.y)
-    ? new Uint8Array(holderPublicKey.y.buffer, holderPublicKey.y.byteOffset, holderPublicKey.y.length)
-    : holderPublicKey.y;
-
+  // holderPublicKey is already a COSE Key Map
   return new Map([
-    [1, new Map([
-      [1, 2],  // kty: EC2
-      [-1, 1], // crv: P-256
-      [-2, xBytes],
-      [-3, yBytes],
-    ])],
+    [1, holderPublicKey],  // 1 = COSE_Key
   ]);
 }
 
@@ -55,28 +44,36 @@ function generateNonce() {
 describe('SD-CWT High-Level API', () => {
 
   describe('Key Generation', () => {
-    it('should generate ES256 key pair', () => {
+    it('should generate ES256 key pair as COSE Keys', () => {
       const keyPair = generateKeyPair(Algorithm.ES256);
       
-      assert.ok(keyPair.privateKey);
-      assert.ok(keyPair.publicKey);
-      assert.ok(keyPair.privateKey.d);
-      assert.ok(keyPair.privateKey.x);
-      assert.ok(keyPair.privateKey.y);
-      assert.ok(keyPair.publicKey.x);
-      assert.ok(keyPair.publicKey.y);
+      // Keys should be Maps (COSE Key format)
+      assert.ok(keyPair.privateKey instanceof Map, 'Private key should be a Map');
+      assert.ok(keyPair.publicKey instanceof Map, 'Public key should be a Map');
+      
+      // Private key should have all COSE Key params
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.Kty), 'Private key should have kty');
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.Crv), 'Private key should have crv');
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.X), 'Private key should have x');
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.Y), 'Private key should have y');
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.D), 'Private key should have d');
+      
+      // Public key should have only public params
+      assert.ok(keyPair.publicKey.has(CoseKeyParam.X), 'Public key should have x');
+      assert.ok(keyPair.publicKey.has(CoseKeyParam.Y), 'Public key should have y');
+      assert.ok(!keyPair.publicKey.has(CoseKeyParam.D), 'Public key should not have d');
     });
 
-    it('should generate ES384 key pair', () => {
+    it('should generate ES384 key pair as COSE Keys', () => {
       const keyPair = generateKeyPair(Algorithm.ES384);
-      assert.ok(keyPair.privateKey.d);
-      assert.ok(keyPair.publicKey.x);
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.D));
+      assert.ok(keyPair.publicKey.has(CoseKeyParam.X));
     });
 
-    it('should generate ES512 key pair', () => {
+    it('should generate ES512 key pair as COSE Keys', () => {
       const keyPair = generateKeyPair(Algorithm.ES512);
-      assert.ok(keyPair.privateKey.d);
-      assert.ok(keyPair.publicKey.x);
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.D));
+      assert.ok(keyPair.publicKey.has(CoseKeyParam.X));
     });
   });
 
