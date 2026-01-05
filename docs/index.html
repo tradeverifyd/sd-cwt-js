@@ -1049,6 +1049,25 @@
       }
     }
 
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.625rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-decoration: none;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .nav-link:hover {
+      color: var(--text-primary);
+      border-color: var(--success-green);
+      background: rgba(62, 201, 94, 0.1);
+    }
+
     @media (max-width: 768px) {
       header {
         padding: 1.5rem;
@@ -1087,7 +1106,10 @@
         </div>
         <p>Interactive testing for Selective Disclosure CBOR Web Tokens • Pre-loaded with <a href="https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/" target="_blank">spec</a> examples</p>
       </div>
-      <div class="header-cta">
+      <div class="header-cta" style="display: flex; gap: 0.75rem; align-items: center;">
+        <a href="verify.html" class="nav-link">
+          <span style="margin-right: 0.35rem;">✓</span>Verifier
+        </a>
         <button id="headerCta" class="primary" onclick="advanceWorkflow()">Issue</button>
       </div>
     </div>
