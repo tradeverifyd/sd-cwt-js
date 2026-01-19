@@ -504,7 +504,7 @@ describe('COSE Key Thumbprint (RFC 9679)', () => {
     
     assert.throws(
       () => coseSign1.computeCoseKeyThumbprint(incompleteKey),
-      /must have crv, x, and y/
+      /must have crv and x/
     );
   });
 });

@@ -84,10 +84,10 @@ describe('COSE Sign1 Module', () => {
       );
     });
 
-    it('should throw if signer key is incomplete', async () => {
+    it('should throw if signer key is incomplete (missing d)', async () => {
       await assert.rejects(
         async () => await sign(Buffer.from('test'), { x: Buffer.alloc(32), y: Buffer.alloc(32) }),
-        /Signer key must include d, x, and y components/
+        /Signer key must include d and x components/
       );
     });
 
@@ -171,7 +171,7 @@ describe('COSE Sign1 Module', () => {
       
       await assert.rejects(
         async () => await verify(signed, { x: Buffer.alloc(32) }),
-        /Verifier key must include x and y components/
+        /key must include x and y components/
       );
     });
   });
@@ -667,6 +667,255 @@ describe('COSE Sign1 Module', () => {
         () => getHeaders(invalidCbor),
         /Invalid COSE.?Sign1 structure/
       );
+    });
+  });
+
+  describe('EdDSA (Ed25519) with algorithm -8', () => {
+    it('should have EdDSA algorithm constant', () => {
+      assert.strictEqual(Algorithm.EdDSA, 'EdDSA');
+    });
+
+    it('should generate Ed25519 key pair as COSE Keys (OKP type)', () => {
+      const keyPair = generateKeyPair(Algorithm.EdDSA);
+      
+      // Keys should be Maps (COSE Key format)
+      assert.ok(keyPair.privateKey instanceof Map, 'Private key should be a Map');
+      assert.ok(keyPair.publicKey instanceof Map, 'Public key should be a Map');
+      
+      // Key type should be OKP (1)
+      assert.strictEqual(keyPair.privateKey.get(CoseKeyParam.Kty), 1, 'Key type should be OKP (1)');
+      assert.strictEqual(keyPair.publicKey.get(CoseKeyParam.Kty), 1, 'Key type should be OKP (1)');
+      
+      // Curve should be Ed25519 (6)
+      assert.strictEqual(keyPair.privateKey.get(CoseKeyParam.Crv), 6, 'Curve should be Ed25519 (6)');
+      assert.strictEqual(keyPair.publicKey.get(CoseKeyParam.Crv), 6, 'Curve should be Ed25519 (6)');
+      
+      // Algorithm should be EdDSA (-8)
+      assert.strictEqual(keyPair.privateKey.get(CoseKeyParam.Alg), -8, 'Algorithm should be EdDSA (-8)');
+      assert.strictEqual(keyPair.publicKey.get(CoseKeyParam.Alg), -8, 'Algorithm should be EdDSA (-8)');
+      
+      // OKP keys have x but NOT y
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.X), 'Private key should have x');
+      assert.ok(keyPair.privateKey.has(CoseKeyParam.D), 'Private key should have d');
+      assert.ok(!keyPair.privateKey.has(CoseKeyParam.Y), 'OKP private key should NOT have y');
+      
+      assert.ok(keyPair.publicKey.has(CoseKeyParam.X), 'Public key should have x');
+      assert.ok(!keyPair.publicKey.has(CoseKeyParam.D), 'Public key should not have d');
+      assert.ok(!keyPair.publicKey.has(CoseKeyParam.Y), 'OKP public key should NOT have y');
+      
+      // Ed25519 keys are 32 bytes
+      assert.strictEqual(keyPair.privateKey.get(CoseKeyParam.X).length, 32);
+      assert.strictEqual(keyPair.privateKey.get(CoseKeyParam.D).length, 32);
+      assert.strictEqual(keyPair.publicKey.get(CoseKeyParam.X).length, 32);
+    });
+
+    it('should sign and verify with Ed25519 COSE Keys', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('Ed25519 COSE Key test');
+      
+      const signed = await sign(payload, privateKey, { algorithm: Algorithm.EdDSA });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should auto-detect Ed25519 algorithm from COSE Key (per RFC 9864)', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('Auto-detect algorithm test');
+      
+      // Don't explicitly specify algorithm - should be detected from key
+      // Per RFC 9864, Ed25519 curve should use fully-specified Ed25519 algorithm (-50)
+      const signed = await sign(payload, privateKey);
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      // Verify the fully-specified algorithm was used per RFC 9864
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -50); // Ed25519 (fully-specified)
+    });
+
+    it('should include kid in unprotected headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('Ed25519 with kid');
+      
+      const signed = await sign(payload, privateKey, {
+        algorithm: Algorithm.EdDSA,
+        kid: 'ed25519-key-001'
+      });
+      
+      const { unprotectedHeaders } = getHeaders(signed);
+      const kidValue = unprotectedHeaders.get(4);
+      assert.ok(kidValue instanceof Uint8Array);
+      assert.deepStrictEqual(Buffer.from(kidValue), Buffer.from('ed25519-key-001'));
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+
+    it('should fail verification with wrong Ed25519 key', async () => {
+      const { privateKey } = generateKeyPair(Algorithm.EdDSA);
+      const { publicKey: wrongPublicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('test');
+      
+      const signed = await sign(payload, privateKey, { algorithm: Algorithm.EdDSA });
+      
+      await assert.rejects(
+        async () => await verify(signed, wrongPublicKey),
+        /Signature verification failed/
+      );
+    });
+
+    it('should work with custom headers', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('Ed25519 with custom headers');
+      
+      const signed = await sign(payload, privateKey, {
+        algorithm: Algorithm.EdDSA,
+        customProtectedHeaders: { [-9999]: 'ed25519-custom' },
+        customUnprotectedHeaders: { [-8888]: 'unprotected-ed25519' }
+      });
+      
+      const { protectedHeaders, unprotectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(-9999), 'ed25519-custom');
+      assert.strictEqual(unprotectedHeaders.get(-8888), 'unprotected-ed25519');
+      
+      const verified = await verify(signed, publicKey);
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+    });
+  });
+
+  describe('RFC 9864 Fully-Specified Algorithms (High-Level API)', () => {
+    it('should export fully-specified algorithm constants per RFC 9864', () => {
+      // Polymorphic (deprecated)
+      assert.strictEqual(Algorithm.EdDSA, 'EdDSA');
+      
+      // Fully-specified (preferred per RFC 9864)
+      assert.strictEqual(Algorithm.Ed25519, 'Ed25519');
+      assert.strictEqual(Algorithm.Ed448, 'Ed448');
+    });
+
+    it('should generate Ed25519 COSE Key with fully-specified algorithm', () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed25519);
+      
+      // Key type should be OKP (1)
+      assert.strictEqual(privateKey.get(CoseKeyParam.Kty), 1);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Kty), 1);
+      
+      // Curve should be Ed25519 (6)
+      assert.strictEqual(privateKey.get(CoseKeyParam.Crv), 6);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Crv), 6);
+      
+      // Algorithm should be Ed25519 (-50) per RFC 9864
+      assert.strictEqual(privateKey.get(CoseKeyParam.Alg), -50);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Alg), -50);
+      
+      // OKP keys have x but NOT y
+      assert.ok(privateKey.has(CoseKeyParam.X));
+      assert.ok(privateKey.has(CoseKeyParam.D));
+      assert.ok(!privateKey.has(CoseKeyParam.Y));
+      
+      assert.ok(publicKey.has(CoseKeyParam.X));
+      assert.ok(!publicKey.has(CoseKeyParam.D));
+      assert.ok(!publicKey.has(CoseKeyParam.Y));
+    });
+
+    it('should sign and verify with Ed25519 fully-specified algorithm', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed25519);
+      const payload = Buffer.from('RFC 9864 Ed25519 test');
+      
+      const signed = await sign(payload, privateKey, { algorithm: Algorithm.Ed25519 });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      // Verify the fully-specified algorithm was used
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -50); // Ed25519
+    });
+
+    it('should generate Ed448 COSE Key with fully-specified algorithm', () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed448);
+      
+      // Key type should be OKP (1)
+      assert.strictEqual(privateKey.get(CoseKeyParam.Kty), 1);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Kty), 1);
+      
+      // Curve should be Ed448 (7)
+      assert.strictEqual(privateKey.get(CoseKeyParam.Crv), 7);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Crv), 7);
+      
+      // Algorithm should be Ed448 (-51) per RFC 9864
+      assert.strictEqual(privateKey.get(CoseKeyParam.Alg), -51);
+      assert.strictEqual(publicKey.get(CoseKeyParam.Alg), -51);
+      
+      // OKP keys have x but NOT y
+      assert.ok(privateKey.has(CoseKeyParam.X));
+      assert.ok(privateKey.has(CoseKeyParam.D));
+      assert.ok(!privateKey.has(CoseKeyParam.Y));
+      
+      // Ed448 keys are 57 bytes
+      assert.strictEqual(privateKey.get(CoseKeyParam.X).length, 57);
+      assert.strictEqual(privateKey.get(CoseKeyParam.D).length, 57);
+      assert.strictEqual(publicKey.get(CoseKeyParam.X).length, 57);
+    });
+
+    it('should sign and verify with Ed448 fully-specified algorithm', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed448);
+      const payload = Buffer.from('RFC 9864 Ed448 test');
+      
+      const signed = await sign(payload, privateKey, { algorithm: Algorithm.Ed448 });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      // Verify the fully-specified algorithm was used
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -51); // Ed448
+    });
+
+    it('should prefer fully-specified algorithm when auto-detecting Ed25519 curve', async () => {
+      // Per RFC 9864, when detecting algorithm from curve,
+      // prefer fully-specified Ed25519 (-50) over polymorphic EdDSA (-8)
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed25519);
+      const payload = Buffer.from('Auto-detect fully-specified');
+      
+      // Don't specify algorithm - should auto-detect Ed25519 from curve
+      const signed = await sign(payload, privateKey);
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -50); // Ed25519 (fully-specified)
+    });
+
+    it('should prefer fully-specified algorithm when auto-detecting Ed448 curve', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.Ed448);
+      const payload = Buffer.from('Auto-detect Ed448');
+      
+      // Don't specify algorithm - should auto-detect Ed448 from curve
+      const signed = await sign(payload, privateKey);
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -51); // Ed448 (fully-specified)
+    });
+
+    it('should still support deprecated EdDSA when explicitly specified', async () => {
+      const { privateKey, publicKey } = generateKeyPair(Algorithm.EdDSA);
+      const payload = Buffer.from('Deprecated EdDSA test');
+      
+      // Explicitly specify EdDSA
+      const signed = await sign(payload, privateKey, { algorithm: Algorithm.EdDSA });
+      const verified = await verify(signed, publicKey);
+      
+      assert.deepStrictEqual(Buffer.from(verified), payload);
+      
+      const { protectedHeaders } = getHeaders(signed);
+      assert.strictEqual(protectedHeaders.get(1), -8); // EdDSA (deprecated)
     });
   });
 });

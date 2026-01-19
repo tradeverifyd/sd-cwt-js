@@ -673,21 +673,31 @@ function extractPublicKeyFromCnf(cnfClaim) {
     throw new Error('Invalid cnf claim: missing COSE_Key (key 1)');
   }
 
-  // Extract x and y coordinates from COSE_Key
-  let x, y;
+  // Extract key type and coordinates from COSE_Key
+  let kty, x, y;
   if (coseKey instanceof Map) {
+    kty = coseKey.get(1);  // kty
     x = coseKey.get(-2);
     y = coseKey.get(-3);
   } else if (typeof coseKey === 'object') {
+    kty = coseKey[1] || coseKey['1'];
     x = coseKey[-2] || coseKey['-2'];
     y = coseKey[-3] || coseKey['-3'];
   }
 
-  if (!x || !y) {
-    throw new Error('Invalid COSE_Key in cnf: missing x (-2) or y (-3) coordinates');
+  if (!x) {
+    throw new Error('Invalid COSE_Key in cnf: missing x (-2) coordinate');
   }
 
-  return { x, y };
+  // For EC2 keys (kty=2), y is required
+  // For OKP keys (kty=1), y is not used
+  if (kty === 2 && !y) {
+    throw new Error('Invalid EC2 COSE_Key in cnf: missing y (-3) coordinate');
+  }
+
+  const result = { x };
+  if (y) result.y = y;
+  return result;
 }
 
 /**

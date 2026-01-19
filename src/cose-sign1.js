@@ -13,11 +13,17 @@ export { HeaderParam, Alg, COSE_Sign1_Tag, getCrypto } from './cose/sign1.js';
 
 /**
  * COSE Sign1 algorithms supported (string aliases)
+ * 
+ * RFC 9864 deprecates polymorphic algorithms and introduces fully-specified alternatives.
+ * Use Ed25519 or Ed448 instead of EdDSA for new implementations.
  */
 export const Algorithm = {
   ES256: 'ES256',
   ES384: 'ES384',
   ES512: 'ES512',
+  EdDSA: 'EdDSA',    // DEPRECATED per RFC 9864 - polymorphic, use Ed25519 or Ed448 instead
+  Ed25519: 'Ed25519', // Fully-specified per RFC 9864 (COSE alg: -50)
+  Ed448: 'Ed448',     // Fully-specified per RFC 9864 (COSE alg: -51)
 };
 
 /**
@@ -48,9 +54,11 @@ export const CoseKeyType = {
  * COSE Elliptic Curves (RFC 8152 Section 13.1)
  */
 export const CoseCurve = {
-  P256: 1,   // NIST P-256 (secp256r1)
-  P384: 2,   // NIST P-384 (secp384r1)
-  P521: 3,   // NIST P-521 (secp521r1)
+  P256: 1,     // NIST P-256 (secp256r1)
+  P384: 2,     // NIST P-384 (secp384r1)
+  P521: 3,     // NIST P-521 (secp521r1)
+  Ed25519: 6,  // Ed25519 (OKP)
+  Ed448: 7,    // Ed448 (OKP)
 };
 
 /**
@@ -60,15 +68,32 @@ const AlgToCurve = {
   'ES256': CoseCurve.P256,
   'ES384': CoseCurve.P384,
   'ES512': CoseCurve.P521,
+  'EdDSA': CoseCurve.Ed25519,   // Polymorphic - defaults to Ed25519
+  'Ed25519': CoseCurve.Ed25519, // Fully-specified per RFC 9864
+  'Ed448': CoseCurve.Ed448,     // Fully-specified per RFC 9864
 };
 
 /**
- * Map COSE curves to algorithm names
+ * Map COSE curves to algorithm names (prefers fully-specified algorithms per RFC 9864)
  */
 const CurveToAlg = {
   [CoseCurve.P256]: 'ES256',
   [CoseCurve.P384]: 'ES384',
   [CoseCurve.P521]: 'ES512',
+  [CoseCurve.Ed25519]: 'Ed25519', // Prefer fully-specified per RFC 9864
+  [CoseCurve.Ed448]: 'Ed448',     // Fully-specified per RFC 9864
+};
+
+/**
+ * Map algorithm names to COSE key types
+ */
+const AlgToKeyType = {
+  'ES256': CoseKeyType.EC2,
+  'ES384': CoseKeyType.EC2,
+  'ES512': CoseKeyType.EC2,
+  'EdDSA': CoseKeyType.OKP,
+  'Ed25519': CoseKeyType.OKP,
+  'Ed448': CoseKeyType.OKP,
 };
 
 /**
@@ -242,29 +267,37 @@ export function computeCoseKeyThumbprint(coseKey, hashAlgorithm = 'SHA-256') {
     throw new Error('COSE Key must be a Map or Object');
   }
   
-  // Validate required parameters for EC2 keys
-  if (kty !== CoseKeyType.EC2) {
-    throw new Error(`Unsupported key type for thumbprint: ${kty}. Only EC2 (2) is supported.`);
+  // Validate required parameters based on key type
+  if (kty !== CoseKeyType.EC2 && kty !== CoseKeyType.OKP) {
+    throw new Error(`Unsupported key type for thumbprint: ${kty}. Only EC2 (2) and OKP (1) are supported.`);
   }
   
-  if (crv === undefined || !x || !y) {
-    throw new Error('COSE Key must have crv, x, and y parameters for thumbprint');
+  if (crv === undefined || !x) {
+    throw new Error('COSE Key must have crv and x parameters for thumbprint');
+  }
+  
+  // EC2 keys also require y
+  if (kty === CoseKeyType.EC2 && !y) {
+    throw new Error('EC2 COSE Key must have y parameter for thumbprint');
   }
   
   // Build the thumbprint input Map with only required public key parameters
   // RFC 9679: Parameters must be in deterministic order
   // For EC2: kty (1), crv (-1), x (-2), y (-3)
+  // For OKP: kty (1), crv (-1), x (-2)
   // CBOR deterministic encoding sorts integer keys by:
   // 1. Positive integers before negative integers
   // 2. Within each group, by absolute value
-  // So the order is: 1, -1, -2, -3
+  // So the order is: 1, -1, -2, [-3 for EC2 only]
   
   // Use an array of [key, value] pairs in the correct order for deterministic encoding
   const thumbprintParams = new Map();
   thumbprintParams.set(CoseKeyParam.Kty, kty);        // 1
   thumbprintParams.set(CoseKeyParam.Crv, crv);        // -1
   thumbprintParams.set(CoseKeyParam.X, toUint8Array(x)); // -2
-  thumbprintParams.set(CoseKeyParam.Y, toUint8Array(y)); // -3
+  if (kty === CoseKeyType.EC2) {
+    thumbprintParams.set(CoseKeyParam.Y, toUint8Array(y)); // -3 (EC2 only)
+  }
   
   // Encode with deterministic/canonical CBOR
   // cbor2 uses canonical encoding by default when encoding Maps
@@ -339,11 +372,15 @@ function normalizeKey(key) {
 
 /**
  * Map string algorithm names to COSE algorithm identifiers
+ * RFC 9864 introduces fully-specified algorithms Ed25519 (-50) and Ed448 (-51)
  */
 const AlgNameToId = {
   'ES256': sign1.Alg.ES256,
   'ES384': sign1.Alg.ES384,
   'ES512': sign1.Alg.ES512,
+  'EdDSA': sign1.Alg.EdDSA,     // -8 (deprecated per RFC 9864)
+  'Ed25519': sign1.Alg.Ed25519, // -50 (fully-specified per RFC 9864)
+  'Ed448': sign1.Alg.Ed448,     // -51 (fully-specified per RFC 9864)
 };
 
 /**
@@ -378,8 +415,15 @@ export async function sign(payload, signerKey, options = {}) {
   const { key: internalKey, algorithm: detectedAlgorithm } = normalizeKey(signerKey);
   const algorithm = explicitAlgorithm || detectedAlgorithm;
 
-  if (!internalKey || !internalKey.d || !internalKey.x || !internalKey.y) {
-    throw new Error('Signer key must include d, x, and y components (COSE Key params -4, -2, -3)');
+  // Validate key based on algorithm type
+  // OKP keys (EdDSA) only need d and x, EC2 keys need d, x, and y
+  if (!internalKey || !internalKey.d || !internalKey.x) {
+    throw new Error('Signer key must include d and x components (COSE Key params -4, -2)');
+  }
+  // OKP algorithms (EdDSA, Ed25519, Ed448) don't need y; EC2 algorithms do
+  const isOkpAlgorithm = algorithm === 'EdDSA' || algorithm === 'Ed25519' || algorithm === 'Ed448';
+  if (!isOkpAlgorithm && !internalKey.y) {
+    throw new Error('EC2 signer key must include d, x, and y components (COSE Key params -4, -2, -3)');
   }
 
   // Convert algorithm string to COSE algorithm identifier
@@ -478,8 +522,9 @@ export async function verify(coseSign1, verifierKey) {
   // Normalize key to internal format
   const { key: internalKey } = normalizeKey(verifierKey);
 
-  if (!internalKey || !internalKey.x || !internalKey.y) {
-    throw new Error('Verifier key must include x and y components (COSE Key params -2, -3)');
+  // All keys need x, y is validated by lower layer based on algorithm
+  if (!internalKey || !internalKey.x) {
+    throw new Error('Verifier key must include x component (COSE Key param -2)');
   }
 
   const messageBytes = toUint8Array(coseSign1);
@@ -523,22 +568,27 @@ export function generateKeyPair(algorithm = Algorithm.ES256) {
 
   const { privateKey, publicKey } = sign1.generateKeyPair(algId);
   const curve = AlgToCurve[algorithm];
+  const keyType = AlgToKeyType[algorithm];
 
   // Create COSE Key Maps with algorithm
   const privateKeyMap = new Map();
-  privateKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+  privateKeyMap.set(CoseKeyParam.Kty, keyType);
   privateKeyMap.set(CoseKeyParam.Alg, algId);  // Store algorithm in key
   privateKeyMap.set(CoseKeyParam.Crv, curve);
   privateKeyMap.set(CoseKeyParam.X, new Uint8Array(privateKey.x));
-  privateKeyMap.set(CoseKeyParam.Y, new Uint8Array(privateKey.y));
+  if (privateKey.y) {
+    privateKeyMap.set(CoseKeyParam.Y, new Uint8Array(privateKey.y));
+  }
   privateKeyMap.set(CoseKeyParam.D, new Uint8Array(privateKey.d));
 
   const publicKeyMap = new Map();
-  publicKeyMap.set(CoseKeyParam.Kty, CoseKeyType.EC2);
+  publicKeyMap.set(CoseKeyParam.Kty, keyType);
   publicKeyMap.set(CoseKeyParam.Alg, algId);  // Store algorithm in key
   publicKeyMap.set(CoseKeyParam.Crv, curve);
   publicKeyMap.set(CoseKeyParam.X, new Uint8Array(publicKey.x));
-  publicKeyMap.set(CoseKeyParam.Y, new Uint8Array(publicKey.y));
+  if (publicKey.y) {
+    publicKeyMap.set(CoseKeyParam.Y, new Uint8Array(publicKey.y));
+  }
 
   // Compute and store thumbprint as kid (key ID)
   const thumbprint = computeCoseKeyThumbprint(publicKeyMap);

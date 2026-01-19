@@ -36,12 +36,15 @@ export const HeaderParam = {
 };
 
 /**
- * COSE Algorithms (RFC 9053)
+ * COSE Algorithms (RFC 9053 and RFC 9864)
  */
 export const Alg = {
   ES256: -7,   // ECDSA w/ SHA-256
   ES384: -35,  // ECDSA w/ SHA-384
   ES512: -36,  // ECDSA w/ SHA-512
+  EdDSA: -8,    // EdDSA (polymorphic - DEPRECATED per RFC 9864)
+  Ed25519: -50, // EdDSA with Ed25519 curve (fully-specified per RFC 9864)
+  Ed448: -51,   // EdDSA with Ed448 curve (fully-specified per RFC 9864)
 };
 
 /**
@@ -56,9 +59,12 @@ const cborDecodeOptions = {
  * Algorithm metadata
  */
 const AlgInfo = {
-  [Alg.ES256]: { name: 'ES256', curve: 'P-256', hash: 'sha256', sigSize: 64 },
-  [Alg.ES384]: { name: 'ES384', curve: 'P-384', hash: 'sha384', sigSize: 96 },
-  [Alg.ES512]: { name: 'ES512', curve: 'P-521', hash: 'sha512', sigSize: 132 },
+  [Alg.ES256]: { name: 'ES256', curve: 'P-256', hash: 'sha256', sigSize: 64, type: 'EC' },
+  [Alg.ES384]: { name: 'ES384', curve: 'P-384', hash: 'sha384', sigSize: 96, type: 'EC' },
+  [Alg.ES512]: { name: 'ES512', curve: 'P-521', hash: 'sha512', sigSize: 132, type: 'EC' },
+  [Alg.EdDSA]: { name: 'EdDSA', curve: 'Ed25519', hash: null, sigSize: 64, type: 'OKP' },
+  [Alg.Ed25519]: { name: 'Ed25519', curve: 'Ed25519', hash: null, sigSize: 64, type: 'OKP' },
+  [Alg.Ed448]: { name: 'Ed448', curve: 'Ed448', hash: null, sigSize: 114, type: 'OKP' },
 };
 
 /**
@@ -117,7 +123,7 @@ function createSigStructure(protectedHeader, payload, externalAad = new Uint8Arr
  * @param {Object} options.key - The signing key
  * @param {Uint8Array} options.key.d - Private key 'd' component
  * @param {Uint8Array} options.key.x - Public key 'x' coordinate
- * @param {Uint8Array} options.key.y - Public key 'y' coordinate
+ * @param {Uint8Array} [options.key.y] - Public key 'y' coordinate (not used for OKP keys)
  * @param {Uint8Array} [options.externalAad] - External additional authenticated data
  * @returns {Promise<Uint8Array>} - COSE_Sign1 message (tagged)
  */
@@ -140,9 +146,6 @@ export async function sign(options) {
   if (!payload) {
     throw new Error('payload is required');
   }
-  if (!key || !key.d || !key.x || !key.y) {
-    throw new Error('key must include d, x, and y components');
-  }
 
   // Get algorithm from protected header
   const alg = protectedHeader.get(HeaderParam.Algorithm);
@@ -153,6 +156,17 @@ export async function sign(options) {
   const algInfo = AlgInfo[alg];
   if (!algInfo) {
     throw new Error(`Unsupported algorithm: ${alg}`);
+  }
+
+  // Validate key based on algorithm type
+  if (algInfo.type === 'OKP') {
+    if (!key || !key.d || !key.x) {
+      throw new Error('key must include d and x components for OKP keys');
+    }
+  } else {
+    if (!key || !key.d || !key.x || !key.y) {
+      throw new Error('key must include d, x, and y components');
+    }
   }
 
   // Encode protected header
@@ -173,8 +187,13 @@ export async function sign(options) {
   // Create Sig_structure
   const sigStructure = createSigStructure(protectedBytes, payloadBytes, externalAad);
 
-  // Sign
-  const signature = await signECDSA(sigStructure, key, algInfo);
+  // Sign based on algorithm type
+  let signature;
+  if (algInfo.type === 'OKP') {
+    signature = await signEdDSA(sigStructure, key, algInfo);
+  } else {
+    signature = await signECDSA(sigStructure, key, algInfo);
+  }
 
   // Build COSE_Sign1: [protected, unprotected, payload, signature]
   const coseSign1 = [
@@ -194,7 +213,7 @@ export async function sign(options) {
  * @param {Uint8Array} coseSign1 - The COSE_Sign1 message
  * @param {Object} key - The verification key
  * @param {Uint8Array} key.x - Public key 'x' coordinate
- * @param {Uint8Array} key.y - Public key 'y' coordinate
+ * @param {Uint8Array} [key.y] - Public key 'y' coordinate (not used for OKP keys)
  * @param {Uint8Array} [externalAad] - External additional authenticated data
  * @returns {Promise<Uint8Array>} - The verified payload
  * @throws {Error} If verification fails
@@ -203,8 +222,8 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
   if (!coseSign1) {
     throw new Error('COSE_Sign1 message is required');
   }
-  if (!key || !key.x || !key.y) {
-    throw new Error('key must include x and y components');
+  if (!key || !key.x) {
+    throw new Error('key must include x component');
   }
 
   // Decode COSE_Sign1
@@ -241,11 +260,21 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
     throw new Error(`Unsupported algorithm: ${alg}`);
   }
 
+  // Validate key based on algorithm type
+  if (algInfo.type !== 'OKP' && !key.y) {
+    throw new Error('key must include x and y components');
+  }
+
   // Create Sig_structure
   const sigStructure = createSigStructure(protectedBytes, payload, externalAad);
 
-  // Verify signature
-  const isValid = await verifyECDSA(sigStructure, signature, key, algInfo);
+  // Verify signature based on algorithm type
+  let isValid;
+  if (algInfo.type === 'OKP') {
+    isValid = await verifyEdDSA(sigStructure, signature, key, algInfo);
+  } else {
+    isValid = await verifyECDSA(sigStructure, signature, key, algInfo);
+  }
   
   if (!isValid) {
     throw new Error('Signature verification failed');
@@ -354,7 +383,56 @@ async function verifyECDSA(data, signature, key, algInfo) {
 }
 
 /**
- * Generates an EC key pair for COSE signing
+ * EdDSA signing using Node.js crypto
+ */
+async function signEdDSA(data, key, algInfo) {
+  const jwk = {
+    kty: 'OKP',
+    crv: algInfo.curve,
+    d: Buffer.from(key.d).toString('base64url'),
+    x: Buffer.from(key.x).toString('base64url'),
+  };
+
+  const privateKey = crypto.createPrivateKey({ key: jwk, format: 'jwk' });
+  // EdDSA doesn't use dsaEncoding option - signature is already in the correct format
+  const signature = await crypto.sign(null, data, privateKey);
+  
+  return new Uint8Array(signature);
+}
+
+/**
+ * EdDSA verification using Node.js crypto
+ */
+async function verifyEdDSA(data, signature, key, algInfo) {
+  // Ensure we have a copy of the signature to avoid view issues
+  let sigBytes;
+  if (signature instanceof Uint8Array) {
+    sigBytes = new Uint8Array(signature.length);
+    sigBytes.set(signature);
+  } else if (ArrayBuffer.isView(signature)) {
+    sigBytes = new Uint8Array(signature.buffer, signature.byteOffset, signature.byteLength);
+    const copy = new Uint8Array(sigBytes.length);
+    copy.set(sigBytes);
+    sigBytes = copy;
+  } else {
+    sigBytes = new Uint8Array(Buffer.from(signature));
+  }
+  
+  const jwk = {
+    kty: 'OKP',
+    crv: algInfo.curve,
+    x: Buffer.from(key.x).toString('base64url'),
+  };
+
+  const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+  const sigBuffer = Buffer.from(sigBytes);
+  
+  // Await the result - browser shim returns a Promise, Node.js returns sync
+  return await crypto.verify(null, data, publicKey, sigBuffer);
+}
+
+/**
+ * Generates an EC or OKP key pair for COSE signing
  * 
  * @param {number} [alg=Alg.ES256] - The algorithm identifier
  * @returns {Object} - { privateKey, publicKey }
@@ -365,6 +443,25 @@ export function generateKeyPair(alg = Alg.ES256) {
     throw new Error(`Unsupported algorithm: ${alg}`);
   }
 
+  if (algInfo.type === 'OKP') {
+    // EdDSA key generation (Ed25519 or Ed448)
+    const { privateKey, publicKey } = crypto.generateKeyPairSync(algInfo.curve.toLowerCase());
+
+    const privateJwk = privateKey.export({ format: 'jwk' });
+    const publicJwk = publicKey.export({ format: 'jwk' });
+
+    return {
+      privateKey: {
+        d: new Uint8Array(Buffer.from(privateJwk.d, 'base64url')),
+        x: new Uint8Array(Buffer.from(privateJwk.x, 'base64url')),
+      },
+      publicKey: {
+        x: new Uint8Array(Buffer.from(publicJwk.x, 'base64url')),
+      },
+    };
+  }
+
+  // EC key generation (ES256, ES384, ES512)
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', {
     namedCurve: algInfo.curve,
   });
@@ -392,4 +489,3 @@ export function generateKeyPair(alg = Alg.ES256) {
 export function getCrypto() {
   return crypto;
 }
-

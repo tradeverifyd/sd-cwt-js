@@ -37,6 +37,23 @@ describe('COSE Sign1 Implementation', () => {
       assert.strictEqual(privateKey.d.length, 66);
       assert.strictEqual(publicKey.x.length, 66);
     });
+
+    it('should generate Ed25519 (EdDSA) key pair', () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      assert.ok(privateKey.d instanceof Uint8Array);
+      assert.ok(privateKey.x instanceof Uint8Array);
+      assert.ok(publicKey.x instanceof Uint8Array);
+      
+      // Ed25519 keys are 32 bytes
+      assert.strictEqual(privateKey.d.length, 32);
+      assert.strictEqual(privateKey.x.length, 32);
+      assert.strictEqual(publicKey.x.length, 32);
+      
+      // OKP keys don't have y coordinate
+      assert.strictEqual(privateKey.y, undefined);
+      assert.strictEqual(publicKey.y, undefined);
+    });
   });
 
   describe('sign', () => {
@@ -173,6 +190,43 @@ describe('COSE Sign1 Implementation', () => {
       
       const verified = await sign1.verify(signed, publicKey);
       assert.deepStrictEqual(verified, payload);
+    });
+
+    it('should verify with EdDSA (Ed25519, algorithm -8)', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const payload = new Uint8Array(Buffer.from('EdDSA Ed25519 test'));
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+    });
+
+    it('should fail verification with wrong Ed25519 key', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      const { publicKey: wrongKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      await assert.rejects(
+        async () => await sign1.verify(signed, wrongKey),
+        /Signature verification failed/
+      );
     });
 
     it('should fail verification with wrong key', async () => {
@@ -401,6 +455,398 @@ describe('COSE Sign1 Implementation', () => {
       
       const verified = await sign1.verify(signed, publicKey);
       assert.deepStrictEqual(verified, payload);
+    });
+  });
+
+  describe('EdDSA (Ed25519) with algorithm -8', () => {
+    it('should have correct algorithm constant', () => {
+      assert.strictEqual(sign1.Alg.EdDSA, -8);
+    });
+
+    it('should generate Ed25519 key pair with correct structure (OKP key type)', () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      // Private key: requires d (private scalar) and x (public point)
+      assert.ok(privateKey.d instanceof Uint8Array, 'Private key must have d');
+      assert.ok(privateKey.x instanceof Uint8Array, 'Private key must have x');
+      assert.strictEqual(privateKey.y, undefined, 'OKP private key must NOT have y');
+      
+      // Public key: requires only x (public point)
+      assert.ok(publicKey.x instanceof Uint8Array, 'Public key must have x');
+      assert.strictEqual(publicKey.y, undefined, 'OKP public key must NOT have y');
+      
+      // Ed25519 keys are 32 bytes
+      assert.strictEqual(privateKey.d.length, 32, 'Ed25519 private key d must be 32 bytes');
+      assert.strictEqual(privateKey.x.length, 32, 'Ed25519 private key x must be 32 bytes');
+      assert.strictEqual(publicKey.x.length, 32, 'Ed25519 public key x must be 32 bytes');
+    });
+
+    it('should sign and verify with Ed25519', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const payload = new Uint8Array(Buffer.from('Ed25519 signing test'));
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      assert.ok(signed instanceof Uint8Array);
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+    });
+
+    it('should include correct algorithm in protected header', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.protectedHeader.get(sign1.HeaderParam.Algorithm), -8);
+    });
+
+    it('should produce 64-byte signature for Ed25519', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.signature.length, 64, 'Ed25519 signature must be 64 bytes');
+    });
+
+    it('should reject signing with OKP key missing d', async () => {
+      const { publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      await assert.rejects(
+        async () => await sign1.sign({
+          protectedHeader,
+          payload: new Uint8Array(Buffer.from('test')),
+          key: publicKey, // Public key, missing d
+        }),
+        /key must include d and x components for OKP keys/
+      );
+    });
+
+    it('should reject signing with OKP key missing x', async () => {
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      await assert.rejects(
+        async () => await sign1.sign({
+          protectedHeader,
+          payload: new Uint8Array(Buffer.from('test')),
+          key: { d: new Uint8Array(32) }, // Missing x
+        }),
+        /key must include d and x components for OKP keys/
+      );
+    });
+
+    it('should reject verifying with OKP key missing x', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      await assert.rejects(
+        async () => await sign1.verify(signed, {}), // Empty key, missing x
+        /key must include x component/
+      );
+    });
+
+    it('should handle empty payload with Ed25519', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const payload = new Uint8Array(0);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.strictEqual(verified.length, 0);
+    });
+
+    it('should handle large payload with Ed25519', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      
+      const payload = new Uint8Array(10000).fill(0x42);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+    });
+
+    it('should include custom headers with Ed25519', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.EdDSA);
+      protectedHeader.set(-65537, 'ed25519-custom');
+      
+      const unprotectedHeader = new Map();
+      unprotectedHeader.set(sign1.HeaderParam.KeyId, Buffer.from('ed25519-key-1'));
+      
+      const payload = new Uint8Array(Buffer.from('Ed25519 with headers'));
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        unprotectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.protectedHeader.get(-65537), 'ed25519-custom');
+      assert.ok(decoded.unprotectedHeader.has(sign1.HeaderParam.KeyId));
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+    });
+  });
+
+  describe('RFC 9864 Fully-Specified Algorithms', () => {
+    it('should have correct algorithm constants per RFC 9864', () => {
+      // Polymorphic (deprecated)
+      assert.strictEqual(sign1.Alg.EdDSA, -8, 'EdDSA should be -8 (deprecated per RFC 9864)');
+      
+      // Fully-specified (preferred)
+      assert.strictEqual(sign1.Alg.Ed25519, -50, 'Ed25519 should be -50 per RFC 9864');
+      assert.strictEqual(sign1.Alg.Ed448, -51, 'Ed448 should be -51 per RFC 9864');
+    });
+
+    it('should generate Ed25519 key pair with fully-specified algorithm (-50)', () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      
+      // OKP key structure (no y coordinate)
+      assert.ok(privateKey.d instanceof Uint8Array);
+      assert.ok(privateKey.x instanceof Uint8Array);
+      assert.ok(publicKey.x instanceof Uint8Array);
+      assert.strictEqual(privateKey.y, undefined, 'OKP keys should not have y');
+      assert.strictEqual(publicKey.y, undefined, 'OKP keys should not have y');
+      
+      // Ed25519 keys are 32 bytes
+      assert.strictEqual(privateKey.d.length, 32);
+      assert.strictEqual(privateKey.x.length, 32);
+      assert.strictEqual(publicKey.x.length, 32);
+    });
+
+    it('should sign and verify with Ed25519 fully-specified algorithm (-50)', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed25519);
+      
+      const payload = new Uint8Array(Buffer.from('RFC 9864 Ed25519 test'));
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+      
+      // Verify the fully-specified algorithm was encoded
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.protectedHeader.get(sign1.HeaderParam.Algorithm), -50);
+    });
+
+    it('should produce 64-byte signature for Ed25519 (-50)', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed25519);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.signature.length, 64, 'Ed25519 signature must be 64 bytes');
+    });
+
+    it('should fail verification with wrong Ed25519 key', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      const { publicKey: wrongKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed25519);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      await assert.rejects(
+        async () => await sign1.verify(signed, wrongKey),
+        /Signature verification failed/
+      );
+    });
+
+    it('should generate Ed448 key pair with fully-specified algorithm (-51)', () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      
+      // OKP key structure (no y coordinate)
+      assert.ok(privateKey.d instanceof Uint8Array);
+      assert.ok(privateKey.x instanceof Uint8Array);
+      assert.ok(publicKey.x instanceof Uint8Array);
+      assert.strictEqual(privateKey.y, undefined, 'OKP keys should not have y');
+      assert.strictEqual(publicKey.y, undefined, 'OKP keys should not have y');
+      
+      // Ed448 private key d is 57 bytes, public key x is 57 bytes
+      assert.strictEqual(privateKey.d.length, 57);
+      assert.strictEqual(privateKey.x.length, 57);
+      assert.strictEqual(publicKey.x.length, 57);
+    });
+
+    it('should sign and verify with Ed448 fully-specified algorithm (-51)', async () => {
+      const { privateKey, publicKey } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed448);
+      
+      const payload = new Uint8Array(Buffer.from('RFC 9864 Ed448 test'));
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload,
+        key: privateKey,
+      });
+      
+      const verified = await sign1.verify(signed, publicKey);
+      assert.deepStrictEqual(verified, payload);
+      
+      // Verify the fully-specified algorithm was encoded
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.protectedHeader.get(sign1.HeaderParam.Algorithm), -51);
+    });
+
+    it('should produce 114-byte signature for Ed448 (-51)', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed448);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      const decoded = sign1.decode(signed);
+      assert.strictEqual(decoded.signature.length, 114, 'Ed448 signature must be 114 bytes');
+    });
+
+    it('should fail verification with wrong Ed448 key', async () => {
+      const { privateKey } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      const { publicKey: wrongKey } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed448);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: privateKey,
+      });
+      
+      await assert.rejects(
+        async () => await sign1.verify(signed, wrongKey),
+        /Signature verification failed/
+      );
+    });
+
+    it('should not allow cross-algorithm verification (Ed25519 vs Ed448)', async () => {
+      const { privateKey: ed25519Key } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      const { publicKey: ed448Key } = sign1.generateKeyPair(sign1.Alg.Ed448);
+      
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed25519);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('test')),
+        key: ed25519Key,
+      });
+      
+      // Trying to verify Ed25519 signature with Ed448 key should fail
+      // (either with JWK error due to key size mismatch, or signature verification failure)
+      await assert.rejects(
+        async () => await sign1.verify(signed, ed448Key),
+        /Invalid JWK|Signature verification failed/
+      );
+    });
+
+    it('should interop between deprecated EdDSA (-8) and fully-specified Ed25519 (-50) keys', async () => {
+      // Keys generated with either algorithm should be compatible
+      // as they both use the Ed25519 curve
+      const { privateKey: eddsaKey, publicKey: eddsaPubKey } = sign1.generateKeyPair(sign1.Alg.EdDSA);
+      const { privateKey: ed25519Key, publicKey: ed25519PubKey } = sign1.generateKeyPair(sign1.Alg.Ed25519);
+      
+      // Sign with EdDSA, verify with Ed25519 key (same curve, should work with explicit algorithm)
+      const protectedHeader = new Map();
+      protectedHeader.set(sign1.HeaderParam.Algorithm, sign1.Alg.Ed25519);
+      
+      const signed = await sign1.sign({
+        protectedHeader,
+        payload: new Uint8Array(Buffer.from('interop test')),
+        key: eddsaKey, // Key from EdDSA generation
+      });
+      
+      // Verify with key from Ed25519 generation (different key, should fail)
+      await assert.rejects(
+        async () => await sign1.verify(signed, ed25519PubKey),
+        /Signature verification failed/
+      );
+      
+      // Verify with matching key should succeed
+      const verified = await sign1.verify(signed, eddsaPubKey);
+      assert.deepStrictEqual(Buffer.from(verified).toString(), 'interop test');
     });
   });
 });
