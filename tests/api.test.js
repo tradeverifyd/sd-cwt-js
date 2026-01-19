@@ -1441,18 +1441,15 @@ describe('API: Strict Depth and Validation', () => {
         expectedAudience,
       });
 
+      // Per SD-CWT spec: decoys are REMOVED from verified claimset
       const items = result.claims.get('items');
+      assert.strictEqual(items.length, 2, 'Decoy should be removed from array');
       assert.strictEqual(items[0], 'secret-item');
       assert.strictEqual(items[1], 'public-item');
-      // items[2] is decoy - remains as RedactedClaimElement
 
-      // Should NOT be clean with default validation (decoy remains)
-      const strictResult = validateClaimsClean(result.claims);
-      assert.strictEqual(strictResult.isClean, false);
-
-      // Should be clean with allowRedacted
-      const lenientResult = validateClaimsClean(result.claims, { allowRedacted: true });
-      assert.ok(lenientResult.isClean);
+      // Should be clean - decoys are removed from arrays
+      const cleanResult = validateClaimsClean(result.claims);
+      assert.ok(cleanResult.isClean, `Issues: ${cleanResult.issues.join(', ')}`);
     });
   });
 

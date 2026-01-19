@@ -842,11 +842,11 @@ describe('SD-CWT Spec Test Vectors', () => {
       const arr = result.claims.get(502);
       assert.ok(Array.isArray(arr));
       
-      // Only element-1 should be disclosed
-      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
-      assert.strictEqual(arr[1], 'element-1');
-      assert.ok(sdCwt.isRedactedClaimElement(arr[2]));
-      assert.strictEqual(arr[3], 'always-visible');
+      // Per SD-CWT spec: undisclosed elements are REMOVED from verified claimset
+      // Only 'element-1' (disclosed) and 'always-visible' should be in the array
+      assert.strictEqual(arr.length, 2, 'Array should only contain disclosed elements');
+      assert.strictEqual(arr[0], 'element-1');
+      assert.strictEqual(arr[1], 'always-visible');
     });
 
     it('should disclose all array elements when all disclosures provided', async () => {
@@ -891,7 +891,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.strictEqual(arr[2], 1674004740);
     });
 
-    it('should keep array elements redacted when disclosures withheld', async () => {
+    it('should remove undisclosed array elements when disclosures withheld', async () => {
       const claims = new Map([
         [1, 'https://issuer.example'],
         [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
@@ -908,7 +908,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES384',
       });
 
-      // Present with NO disclosures (keep all redacted)
+      // Present with NO disclosures - undisclosed elements are REMOVED
       const kbt = await Holder.present({
         token,
         selectedDisclosures: [],
@@ -925,13 +925,9 @@ describe('SD-CWT Spec Test Vectors', () => {
 
       const arr = result.claims.get(502);
       assert.ok(Array.isArray(arr));
-      assert.strictEqual(arr.length, 3);
-      
-      // First two should still be redacted
-      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
-      assert.ok(sdCwt.isRedactedClaimElement(arr[1]));
-      // Third always visible
-      assert.strictEqual(arr[2], 'public-date');
+      // Per SD-CWT spec: undisclosed elements are REMOVED, only 'public-date' remains
+      assert.strictEqual(arr.length, 1, 'Only public element should remain');
+      assert.strictEqual(arr[0], 'public-date');
     });
 
   });
@@ -1036,10 +1032,10 @@ describe('SD-CWT Spec Test Vectors', () => {
       // Claim 501 should be disclosed
       assert.strictEqual(result.claims.get(501), 'LICENSE-NUMBER');
       
-      // Array elements should still be redacted
+      // Per SD-CWT spec: undisclosed array elements are REMOVED
+      // Array should be empty since no array element disclosures were selected
       const arr = result.claims.get(502);
-      assert.ok(sdCwt.isRedactedClaimElement(arr[0]));
-      assert.ok(sdCwt.isRedactedClaimElement(arr[1]));
+      assert.strictEqual(arr.length, 0, 'Undisclosed array elements should be removed');
       
       // Nested region should be disclosed
       const location = result.claims.get(503);

@@ -796,11 +796,13 @@ describe('reconstructArray()', () => {
     const partialDisclosures = [disclosures[0]];
     const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, partialDisclosures);
     
-    assert.strictEqual(reconstructed.length, 3);
+    // Per SD-CWT spec: undisclosed elements are REMOVED from verified claimset
+    // Array should only contain: 'secret1' (disclosed) and 'public'
+    assert.strictEqual(reconstructed.length, 2, 
+      'Verified array should only contain disclosed elements');
     assert.strictEqual(reconstructed[0], 'secret1');
-    assert.ok(isRedactedClaimElement(reconstructed[1])); // Still redacted
-    assert.strictEqual(reconstructed[2], 'public');
-    assert.strictEqual(redactedElements.length, 1);
+    assert.strictEqual(reconstructed[1], 'public');
+    assert.strictEqual(redactedElements.length, 1); // One element not disclosed
   });
 
   it('should handle array decoys', () => {
@@ -812,12 +814,12 @@ describe('reconstructArray()', () => {
     const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
     const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, disclosures);
     
-    assert.strictEqual(reconstructed.length, 3); // 2 decoys + 1 public
-    // Decoys remain as redacted elements
-    assert.ok(isRedactedClaimElement(reconstructed[0]));
-    assert.ok(isRedactedClaimElement(reconstructed[1]));
-    assert.strictEqual(reconstructed[2], 'public');
-    assert.strictEqual(redactedElements.length, 2);
+    // Per SD-CWT spec: decoys are REMOVED from verified claimset
+    // Array should only contain: 'public'
+    assert.strictEqual(reconstructed.length, 1, 
+      'Verified array should have decoys removed');
+    assert.strictEqual(reconstructed[0], 'public');
+    assert.strictEqual(redactedElements.length, 2); // Decoy hashes tracked
   });
 
   it('should reconstruct nested arrays', () => {
@@ -941,11 +943,12 @@ describe('Roundtrip: Redaction → Reconstruction', () => {
     assert.strictEqual(reconstructed.get(504), 'ABCD-123456');
     assert.strictEqual(reconstructed.get(500), true);
     
-    // Dates should remain redacted
+    // Per SD-CWT spec: undisclosed array elements are REMOVED from verified claimset
+    // Only the public date (1674004740) should remain
     const dates = reconstructed.get(502);
-    assert.ok(isRedactedClaimElement(dates[0]));
-    assert.ok(isRedactedClaimElement(dates[1]));
-    assert.strictEqual(dates[2], 1674004740);
+    assert.strictEqual(dates.length, 1, 
+      'Array should only have public date, undisclosed removed');
+    assert.strictEqual(dates[0], 1674004740);
   });
 
   it('should survive CBOR encode/decode cycle', () => {
@@ -1846,35 +1849,377 @@ describe('Full Roundtrip with Validation', () => {
     assert.strictEqual(data[1].get('deep'), 'deep-secret');
   });
 
-  it('should allow redacted elements when using allowRedacted option', () => {
+  it('should produce clean claims when disclosures are provided (decoys removed)', () => {
+    // Per SD-CWT spec: decoys are removed from verified claimset
     const midArray = [
       toBeRedacted('array-secret'),
-      toBeDecoy(1), // This will remain as RedactedClaimElement after reconstruction
+      toBeDecoy(1), // Decoy will be REMOVED in verified claimset
     ];
     
     const topLevel = new Map([
       ['data', midArray],
-      [toBeDecoy(1), null], // This will remain as redacted key hash
+      [toBeDecoy(1), null], // Map decoy - tracked in redactedKeys
     ]);
     
     const { claims: redacted, disclosures } = processToBeRedacted(topLevel);
     const { claims: reconstructed, redactedKeys } = reconstructClaims(redacted, disclosures);
     
-    // Without allowRedacted, should NOT be clean (decoys remain)
-    const strictResult = validateClaimsClean(reconstructed);
-    assert.strictEqual(strictResult.isClean, false);
+    // Should be clean - decoys are removed from arrays, not kept
+    const result = validateClaimsClean(reconstructed);
+    assert.ok(result.isClean, 
+      `Should be clean but got: ${result.issues.join(', ')}`);
     
-    // With allowRedacted, should be clean
-    const lenientResult = validateClaimsClean(reconstructed, { allowRedacted: true });
-    assert.ok(lenientResult.isClean);
+    // Both decoy hashes tracked in redactedKeys (1 from map + 1 from array element)
+    // The array element decoy hash is passed up through recursive reconstruction
+    assert.strictEqual(redactedKeys.length, 2, 
+      'Both map decoy and array element decoy hashes should be tracked');
     
-    // Verify decoy hashes remain - 1 from map decoy + 1 from array element decoy = 2
-    assert.strictEqual(redactedKeys.length, 2);
-    
-    // Verify array has redacted element for decoy
+    // Array should have decoy removed, only disclosed element remains
     const data = reconstructed.get('data');
+    assert.strictEqual(data.length, 1, 'Array should have decoy removed');
     assert.strictEqual(data[0], 'array-secret');
-    assert.ok(isRedactedClaimElement(data[1]));
+  });
+
+});
+
+describe('Array Disclosure: Size and Index Changes', () => {
+  // Per SD-CWT spec: The verified claimset should only contain disclosed elements.
+  // Decoys and non-disclosed redacted elements should be REMOVED from arrays,
+  // not kept as placeholders. This means:
+  // 1. Array size = number of disclosed elements only
+  // 2. Indexes of disclosed elements change after reconstruction
+
+  describe('Basic array disclosure removes undisclosed elements', () => {
+    it('should reduce array size when elements are not disclosed', () => {
+      // Original: [redact(A), redact(B), C] where A,B are redacted, C is public
+      const array = [
+        toBeRedacted('secret1'),
+        toBeRedacted('secret2'),
+        'public',
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      
+      // Disclose only the first element
+      const partialDisclosures = [disclosures[0]];
+      const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, partialDisclosures);
+      
+      // Verified claimset should have only 2 elements: 'secret1' and 'public'
+      // The undisclosed 'secret2' should be REMOVED, not kept as a redacted element
+      assert.strictEqual(reconstructed.length, 2, 
+        'Array should only contain disclosed elements (secret1, public)');
+      assert.strictEqual(reconstructed[0], 'secret1');
+      assert.strictEqual(reconstructed[1], 'public');
+      
+      // One element remains redacted (not disclosed)
+      assert.strictEqual(redactedElements.length, 1);
+    });
+
+    it('should return empty array when no elements are disclosed', () => {
+      const array = [
+        toBeRedacted('secret1'),
+        toBeRedacted('secret2'),
+      ];
+      
+      const { array: redactedArray } = processArrayToBeRedacted(array);
+      
+      // Provide no disclosures
+      const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, []);
+      
+      // Verified claimset should be empty - no disclosed elements
+      assert.strictEqual(reconstructed.length, 0, 
+        'Array should be empty when no elements are disclosed');
+      assert.strictEqual(redactedElements.length, 2);
+    });
+  });
+
+  describe('Decoys are removed from verified arrays', () => {
+    it('should remove all decoys from reconstructed array', () => {
+      const array = [
+        toBeDecoy(2),  // 2 decoys
+        'public',
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      
+      // Decoys produce no disclosures
+      assert.strictEqual(disclosures.length, 0);
+      
+      const { array: reconstructed, redactedElements } = reconstructArray(redactedArray, disclosures);
+      
+      // Verified claimset should only have 'public' - decoys are removed
+      assert.strictEqual(reconstructed.length, 1, 
+        'Array should only contain public element, decoys removed');
+      assert.strictEqual(reconstructed[0], 'public');
+      
+      // Decoy hashes remain in redactedElements for tracking
+      assert.strictEqual(redactedElements.length, 2);
+    });
+
+    it('should remove decoys interspersed with real elements', () => {
+      const array = [
+        toBeDecoy(1),
+        toBeRedacted('secret'),
+        toBeDecoy(2),
+        'public',
+        toBeDecoy(1),
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      
+      // Only 1 disclosure for the real redacted element
+      assert.strictEqual(disclosures.length, 1);
+      
+      // Disclose the secret
+      const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+      
+      // Verified array should have: 'secret', 'public' (all decoys removed)
+      assert.strictEqual(reconstructed.length, 2, 
+        'Array should only contain disclosed elements, all decoys removed');
+      assert.strictEqual(reconstructed[0], 'secret');
+      assert.strictEqual(reconstructed[1], 'public');
+    });
+  });
+
+  describe('Index changes after disclosure', () => {
+    it('should have correct indexes for disclosed elements after removal', () => {
+      // Original conceptual array: [D, D, secret, D, public] 
+      // where D = decoy
+      const array = [
+        toBeDecoy(2),
+        toBeRedacted('secret'),
+        toBeDecoy(1),
+        'public',
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+      
+      // After removing decoys: ['secret', 'public']
+      // 'secret' which was at conceptual index 2 is now at index 0
+      // 'public' which was at conceptual index 4 is now at index 1
+      assert.strictEqual(reconstructed.length, 2);
+      assert.strictEqual(reconstructed[0], 'secret', 
+        'secret should be at index 0 after decoys removed');
+      assert.strictEqual(reconstructed[1], 'public', 
+        'public should be at index 1 after decoys removed');
+    });
+
+    it('should preserve order of disclosed elements', () => {
+      const array = [
+        toBeRedacted('first'),
+        toBeRedacted('second'),
+        toBeRedacted('third'),
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      
+      // Disclose only first and third
+      const partialDisclosures = [disclosures[0], disclosures[2]];
+      const { array: reconstructed } = reconstructArray(redactedArray, partialDisclosures);
+      
+      // Should have ['first', 'third'] in order, 'second' removed
+      assert.strictEqual(reconstructed.length, 2);
+      assert.strictEqual(reconstructed[0], 'first');
+      assert.strictEqual(reconstructed[1], 'third');
+    });
+
+    it('should preserve relative order when middle elements are not disclosed', () => {
+      const array = [
+        'A',
+        toBeRedacted('B'),
+        'C',
+        toBeRedacted('D'),
+        'E',
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(array);
+      
+      // Don't disclose anything
+      const { array: reconstructed } = reconstructArray(redactedArray, []);
+      
+      // Should have ['A', 'C', 'E'] - public elements remain, undisclosed removed
+      assert.strictEqual(reconstructed.length, 3);
+      assert.strictEqual(reconstructed[0], 'A');
+      assert.strictEqual(reconstructed[1], 'C');
+      assert.strictEqual(reconstructed[2], 'E');
+    });
+  });
+
+  describe('Nested arrays with disclosure removal', () => {
+    it('should remove undisclosed elements from nested arrays', () => {
+      const innerArray = [
+        toBeRedacted('inner-secret'),
+        toBeDecoy(1),
+        'inner-public',
+      ];
+      
+      const outerArray = [innerArray, 'outer-public'];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(outerArray);
+      const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+      
+      // Outer array should have 2 elements
+      assert.strictEqual(reconstructed.length, 2);
+      
+      // Inner array should have 2 elements: 'inner-secret' and 'inner-public'
+      // The decoy should be removed
+      const innerResult = reconstructed[0];
+      assert.ok(Array.isArray(innerResult));
+      assert.strictEqual(innerResult.length, 2, 
+        'Inner array should have decoy removed');
+      assert.strictEqual(innerResult[0], 'inner-secret');
+      assert.strictEqual(innerResult[1], 'inner-public');
+    });
+
+    it('should handle deeply nested arrays with mixed disclosures', () => {
+      const level3 = [
+        toBeRedacted('deep-secret'),
+        toBeDecoy(2),
+        'deep-public',
+      ];
+      
+      const level2 = [
+        level3,
+        toBeRedacted('mid-secret'),
+      ];
+      
+      const level1 = [
+        level2,
+        'top-public',
+        toBeDecoy(1),
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(level1);
+      const { array: reconstructed } = reconstructArray(redactedArray, disclosures);
+      
+      // Level 1: [level2, 'top-public'] - decoy removed
+      assert.strictEqual(reconstructed.length, 2);
+      assert.strictEqual(reconstructed[1], 'top-public');
+      
+      // Level 2: [level3, 'mid-secret'] - all disclosed
+      const l2 = reconstructed[0];
+      assert.ok(Array.isArray(l2));
+      assert.strictEqual(l2.length, 2);
+      assert.strictEqual(l2[1], 'mid-secret');
+      
+      // Level 3: ['deep-secret', 'deep-public'] - decoys removed
+      const l3 = l2[0];
+      assert.ok(Array.isArray(l3));
+      assert.strictEqual(l3.length, 2, 'Level 3 should have 2 decoys removed');
+      assert.strictEqual(l3[0], 'deep-secret');
+      assert.strictEqual(l3[1], 'deep-public');
+    });
+  });
+
+  describe('Arrays in maps with disclosure removal', () => {
+    it('should remove undisclosed elements from arrays within maps', () => {
+      const arrayWithRedactions = [
+        toBeRedacted(1549560720),
+        toBeRedacted(1612345678),
+        toBeDecoy(1),
+        1674004740, // public
+      ];
+      
+      const claims = new Map([
+        ['dates', arrayWithRedactions],
+        [toBeRedacted('secret'), 'secret-value'],
+      ]);
+      
+      const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+      
+      // Find and select only the claim disclosure (not the array element disclosures)
+      const claimDisclosure = disclosures.find(d => {
+        const decoded = decodeDisclosure(d);
+        return decoded.claimName === 'secret';
+      });
+      
+      const { claims: reconstructed } = reconstructClaims(redactedClaims, [claimDisclosure]);
+      
+      // The 'dates' array should only have the public element
+      // (redacted elements not disclosed, decoy removed)
+      const dates = reconstructed.get('dates');
+      assert.ok(Array.isArray(dates));
+      assert.strictEqual(dates.length, 1, 
+        'Array should only have public element, undisclosed and decoys removed');
+      assert.strictEqual(dates[0], 1674004740);
+    });
+
+    it('should correctly reconstruct arrays when all elements are disclosed', () => {
+      const arrayWithRedactions = [
+        toBeRedacted('a'),
+        toBeRedacted('b'),
+        'c',
+      ];
+      
+      const claims = new Map([
+        ['items', arrayWithRedactions],
+      ]);
+      
+      const { claims: redactedClaims, disclosures } = processToBeRedacted(claims);
+      
+      // Disclose all
+      const { claims: reconstructed } = reconstructClaims(redactedClaims, disclosures);
+      
+      const items = reconstructed.get('items');
+      assert.strictEqual(items.length, 3);
+      assert.strictEqual(items[0], 'a');
+      assert.strictEqual(items[1], 'b');
+      assert.strictEqual(items[2], 'c');
+    });
+  });
+
+  describe('Complex selective disclosure scenarios', () => {
+    it('should handle selective disclosure with specific element selection', () => {
+      // Simulate a credential with redactable and decoy elements
+      const inspectionDates = [
+        toBeRedacted(1549560720), // Date 1 - redactable
+        toBeDecoy(1),              // Decoy to obscure array size
+        toBeRedacted(1612445940), // Date 2 - redactable
+        toBeDecoy(2),              // More decoys
+        1674004740,                // Date 3 - public
+      ];
+      
+      const { array: redactedArray, disclosures } = processArrayToBeRedacted(inspectionDates);
+      
+      // Original array has 6 elements after processing (2 redacted + 3 decoys + 1 public)
+      assert.strictEqual(redactedArray.length, 6);
+      
+      // Holder chooses to only disclose Date 2 (second disclosure)
+      const selectedDisclosures = [disclosures[1]]; // Only Date 2
+      
+      const { array: verified } = reconstructArray(redactedArray, selectedDisclosures);
+      
+      // Verified array should only have: Date 2 and public Date 3
+      // Date 1 (not disclosed) and all decoys should be removed
+      assert.strictEqual(verified.length, 2, 
+        'Verified array should only have 1 disclosed + 1 public element');
+      assert.strictEqual(verified[0], 1612445940, 'First element should be disclosed Date 2');
+      assert.strictEqual(verified[1], 1674004740, 'Second element should be public Date 3');
+    });
+
+    it('should validate clean after disclosure with array size change', () => {
+      const array = [
+        toBeRedacted('disclosed'),
+        toBeDecoy(3),
+        'public',
+      ];
+      
+      const claims = new Map([
+        ['data', array],
+      ]);
+      
+      const { claims: redacted, disclosures } = processToBeRedacted(claims);
+      const { claims: reconstructed } = reconstructClaims(redacted, disclosures);
+      
+      // Should be clean (no redacted elements remaining)
+      const validation = validateClaimsClean(reconstructed);
+      assert.ok(validation.isClean, `Should be clean but got: ${validation.issues.join(', ')}`);
+      
+      // Array should have 2 elements: 'disclosed' and 'public' (decoys removed)
+      const data = reconstructed.get('data');
+      assert.strictEqual(data.length, 2);
+    });
   });
 
 });

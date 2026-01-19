@@ -228,7 +228,7 @@ describe('Example Templates', () => {
 
       assert.strictEqual(disclosures.length, 2, 'Should have 2 cargo disclosures');
 
-      // Present with NO cargo disclosures - all items stay redacted
+      // Present with NO cargo disclosures - per SD-CWT spec, undisclosed elements are REMOVED
       const presentation = await Holder.present({
         token,
         selectedDisclosures: [],
@@ -245,10 +245,11 @@ describe('Example Templates', () => {
       assert.ok(result.claims instanceof Map);
       assert.strictEqual(result.claims.get(600), 'MBLX-2024-78542');
       assert.strictEqual(result.claims.get(604), 300);
-      // Cargo array should have redacted entries
+      // Per SD-CWT spec: undisclosed array elements are REMOVED from verified claimset
+      // Cargo array should be empty since no elements were disclosed
       const cargo = result.claims.get(603);
       assert.ok(cargo instanceof Array);
-      assert.strictEqual(cargo.length, 2);
+      assert.strictEqual(cargo.length, 0, 'Undisclosed array elements are removed');
     });
   });
 

@@ -702,6 +702,12 @@ export function reconstructArray(redactedArray, disclosures, hashAlgOrOptions = 
 
 /**
  * Internal recursive implementation for reconstructArray with depth tracking
+ * 
+ * Per SD-CWT spec: The verified claimset should only contain disclosed elements.
+ * Undisclosed elements (including decoys) are REMOVED from the array, not kept
+ * as placeholders. This means:
+ * - Array size equals the number of disclosed elements only
+ * - Indexes of disclosed elements change after reconstruction
  */
 function reconstructArrayRecursive(redactedArray, lookup, strict, depth) {
   checkDepth(depth, strict);
@@ -727,8 +733,8 @@ function reconstructArrayRecursive(redactedArray, lookup, strict, depth) {
         remainingRedactedHashes.push(...redactedHashes);
         resultArray.push(restoredValue);
       } else {
-        // No matching disclosure (or is decoy) - keep as redacted
-        resultArray.push(element);
+        // No matching disclosure (or is decoy) - REMOVE from verified array
+        // Only track the hash, don't include in result array
         remainingRedactedHashes.push(hashBytes);
       }
     } else {
