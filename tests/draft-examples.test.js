@@ -216,3 +216,72 @@ describe('acting as Holder over the draft\'s own credential', () => {
   });
 
 });
+
+describe('every canonical example in the draft', () => {
+
+  // The two files above are the worked example. These four cover the features
+  // that example does not reach: decoys, and nesting.
+  const audienceOf = kbt => {
+    const arr = cbor.decode(kbt, sdCwt.cborDecodeOptions).contents;
+    return cbor.decode(arr[2], sdCwt.cborDecodeOptions).get(3);
+  };
+
+  describe('decoy.cbor', () => {
+
+    it('verifies, and every disclosure including the decoys is used', async () => {
+      const token = read('decoy.cbor');
+      await coseSign1.verify(token, ISSUER_PUBLIC_KEY);
+
+      const arr = cbor.decode(token, sdCwt.cborDecodeOptions).contents;
+      const disclosures = arr[1].get(17);
+      const claims = cbor.decode(arr[2], sdCwt.cborDecodeOptions);
+
+      // A decoy is a one-element array carrying only a salt.
+      const decoys = disclosures.filter(
+        d => cbor.decode(d, sdCwt.cborDecodeOptions).length === 1
+      );
+      assert.strictEqual(disclosures.length, 4);
+      assert.strictEqual(decoys.length, 2, 'two of the four are decoys');
+
+      const { unusedDisclosures } = sdCwt.reconstructClaims(claims, disclosures, 'sha256');
+      assert.deepStrictEqual(unusedDisclosures, [],
+        'a decoy digest sits in the payload like any other, so it is used, not left over');
+    });
+
+  });
+
+  describe('nested disclosures', () => {
+
+    // Nesting is resolved iteratively: revealing one disclosure exposes
+    // Redacted Claim Hashes inside its value. Matching every disclosure against
+    // only the outermost hashes fails on these files, which is what makes them
+    // worth keeping.
+    for (const [name, count] of [['nested_issuer_cwt.cbor', 15], ['nested_cwt.cbor', 7]]) {
+      it(`${name} verifies and resolves all ${count} disclosures`, async () => {
+        const token = read(name);
+        await coseSign1.verify(token, ISSUER_PUBLIC_KEY);
+
+        const arr = cbor.decode(token, sdCwt.cborDecodeOptions).contents;
+        const disclosures = arr[1].get(17);
+        assert.strictEqual(disclosures.length, count);
+
+        const claims = cbor.decode(arr[2], sdCwt.cborDecodeOptions);
+        const { unusedDisclosures } = sdCwt.reconstructClaims(claims, disclosures, 'sha256');
+        assert.deepStrictEqual(unusedDisclosures, [],
+          'every nested disclosure must resolve once its parent is revealed');
+      });
+    }
+
+    it('nested_kbt.cbor verifies end to end', async () => {
+      const kbt = read('nested_kbt.cbor');
+      const { claims } = await Verifier.verify({
+        presentation: kbt,
+        issuerPublicKey: ISSUER_PUBLIC_KEY,
+        expectedAudience: audienceOf(kbt),
+      });
+      assert.ok(claims.size > 0);
+    });
+
+  });
+
+});
