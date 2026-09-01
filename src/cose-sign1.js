@@ -665,6 +665,13 @@ function convertBufferValues(value) {
     }
     return result;
   }
+  if (value instanceof cbor.Tag) {
+    // Must precede the generic object branch: a Tag is an object, so the
+    // shallow copy below would flatten it into a plain `{}` and lose the tag
+    // number entirely. Embedded structures such as the SD-KBT `kcwt` header
+    // (tag 18) depend on the tag surviving.
+    return new cbor.Tag(value.tag, convertBufferValues(value.contents));
+  }
   if (value !== null && typeof value === 'object') {
     const result = {};
     for (const [k, v] of Object.entries(value)) {

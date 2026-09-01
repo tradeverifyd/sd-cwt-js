@@ -53,7 +53,7 @@ describe('SD-CWT Tags and Simple Values', () => {
     it('should have correct tag numbers', () => {
       assert.strictEqual(Tag.ToBeRedacted, 58);
       assert.strictEqual(Tag.RedactedClaimElement, 60);
-      assert.strictEqual(Tag.ToBeDecoy, 61);
+      assert.strictEqual(Tag.ToBeDecoy, 62);
     });
   });
 
@@ -291,10 +291,10 @@ describe('Redacted Keys Simple Value', () => {
 describe('To Be Decoy Tag', () => {
 
   describe('toBeDecoy()', () => {
-    it('should create a tag with number 61', () => {
+    it('should create a tag with number 62', () => {
       const tagged = toBeDecoy(3);
       assert.ok(tagged instanceof cbor.Tag);
-      assert.strictEqual(tagged.tag, 61);
+      assert.strictEqual(tagged.tag, 62);
       assert.strictEqual(tagged.contents, 3);
     });
 
