@@ -419,7 +419,7 @@ describe('SD-CWT Spec Test Vectors', () => {
     // Tests for COSE Header Parameters defined in IANA considerations
     // Note: sd_claims is added during presentation, not issuance
 
-    it('should set sd_alg (label 18) in protected header when disclosures exist', async () => {
+    it('should set sd_alg (label 170) in protected header when disclosures exist', async () => {
       const claims = new Map([
         [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
         [toBeRedacted(501), 'secret-value'],
@@ -434,15 +434,15 @@ describe('SD-CWT Spec Test Vectors', () => {
       // Parse the COSE_Sign1 structure to check headers
       const headers = coseSign1.getHeaders(token);
       
-      // sd_alg (18) should be in protected header
-      assert.ok(headers.protectedHeaders.has(18), 'sd_alg (18) must be in protected header');
-      
+      // sd_alg is registered at label 170 (Section 17.1), not 18
+      assert.ok(headers.protectedHeaders.has(170), 'sd_alg (170) must be in protected header');
+
       // The value should be -16 (SHA-256)
-      const sdAlgHeader = headers.protectedHeaders.get(18);
+      const sdAlgHeader = headers.protectedHeaders.get(170);
       assert.strictEqual(sdAlgHeader, -16, 'sd_alg value should be -16 (SHA-256)');
     });
 
-    it('should set typ (label 16) to application/sd-cwt in protected header', async () => {
+    it('should set typ (label 16) to the CoAP content-format 293 in protected header', async () => {
       const claims = new Map([
         [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
         [500, 'public-value'],
@@ -460,7 +460,8 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.ok(headers.protectedHeaders.has(16), 'typ (16) must be in protected header');
       
       const typHeader = headers.protectedHeaders.get(16);
-      assert.strictEqual(typHeader, 'application/sd-cwt');
+      // Spec section 4: SHOULD use 293 rather than 'application/sd-cwt'.
+      assert.strictEqual(typHeader, 293);
     });
 
     it('should set sd_claims (label 17) in SD-CWT during presentation', async () => {
@@ -497,13 +498,11 @@ describe('SD-CWT Spec Test Vectors', () => {
       const kbtProtectedBytes = kbtDecoded.contents[0];
       const kbtProtectedHeader = cbor.decode(kbtProtectedBytes);
       
-      // kcwt (13) contains the SD-CWT
-      const sdCwtBytes = kbtProtectedHeader.get(13);
-      assert.ok(sdCwtBytes);
-      
-      // Parse the SD-CWT inside
-      const sdCwtDecoded = cbor.decode(sdCwtBytes);
+      // kcwt (13) holds the SD-CWT as the embedded #6.18 structure
+      const sdCwtDecoded = kbtProtectedHeader.get(13);
+      assert.ok(sdCwtDecoded);
       assert.ok(sdCwtDecoded instanceof cbor.Tag);
+      assert.strictEqual(sdCwtDecoded.tag, 18, 'kcwt must be a tag 18 COSE_Sign1');
       
       // Get the unprotected header of the SD-CWT
       const sdCwtUnprotected = sdCwtDecoded.contents[1];
@@ -516,7 +515,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.strictEqual(sdClaimsHeader.length, 2, 'All selected disclosures should be in sd_claims');
     });
 
-    it('should have empty sd_claims in presentation when no disclosures selected', async () => {
+    it('should omit sd_claims in presentation when no disclosures selected', async () => {
       const claims = new Map([
         [ClaimKey.Cnf, createCnfClaim(HOLDER_KEY.publicKey)],
         [toBeRedacted(501), 'secret-value'],
@@ -540,15 +539,15 @@ describe('SD-CWT Spec Test Vectors', () => {
       // Parse and check the SD-CWT inside the SD-KBT
       const kbtDecoded = cbor.decode(kbt);
       const kbtProtectedBytes = kbtDecoded.contents[0];
-      const kbtProtectedHeader = cbor.decode(kbtProtectedBytes);
-      const sdCwtBytes = kbtProtectedHeader.get(13);
-      const sdCwtDecoded = cbor.decode(sdCwtBytes);
+      const kbtProtectedHeader = cbor.decode(kbtProtectedBytes, sdCwt.cborDecodeOptions);
+      const sdCwtDecoded = kbtProtectedHeader.get(13);
       const sdCwtUnprotected = sdCwtDecoded.contents[1];
-      
-      // sd_claims should be empty array
-      const sdClaimsHeader = sdCwtUnprotected.get(17);
-      assert.ok(Array.isArray(sdClaimsHeader));
-      assert.strictEqual(sdClaimsHeader.length, 0, 'sd_claims should be empty when no disclosures selected');
+
+      // Section 4: "If the Holder does not disclose any claims, it MUST omit
+      // the `sd_claims` header parameter." An empty array is invalid, and a
+      // Verifier is required to reject it.
+      assert.ok(!sdCwtUnprotected.has(17),
+        'sd_claims MUST be omitted, not sent as an empty array, when nothing is disclosed');
     });
 
   });

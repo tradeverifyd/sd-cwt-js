@@ -16,7 +16,7 @@ import * as coseSign1 from './cose-sign1.js';
 import * as sdCwt from './sd-cwt.js';
 
 // Re-export key utilities
-export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean, ClaimKey, MediaType, HeaderParam } from './sd-cwt.js';
+export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean, assertPreIssuanceValid, ClaimKey, MediaType, ContentFormat, isSdCwtTyp, isKbCwtTyp, HeaderParam } from './sd-cwt.js';
 export { 
   generateKeyPair, 
   Algorithm, 
@@ -103,6 +103,11 @@ export const Issuer = {
       throw new Error('cnf (8) claim MUST NOT be redacted (per spec Section 7)');
     }
 
+    // Section 6.4 and 6.5: reject nested tags in map keys, a key present both
+    // plain and To Be Redacted, duplicate Preferred Encodings, and non-finite
+    // exp/nbf/iat, before anything is signed.
+    sdCwt.assertPreIssuanceValid(claims);
+
     // Process claims to handle toBeRedacted and toBeDecoy tags
     const { claims: processedClaims, disclosures } = sdCwt.processToBeRedacted(claims, { hashAlg: hashAlgorithm, strict });
 
@@ -110,7 +115,7 @@ export const Issuer = {
     const customProtectedHeaders = new Map();
     
     // Add typ header for SD-CWT
-    customProtectedHeaders.set(sdCwt.HeaderParam.Typ, sdCwt.MediaType.SdCwt);
+    customProtectedHeaders.set(sdCwt.HeaderParam.Typ, sdCwt.ContentFormat.SdCwt);
     
     // Add sd_alg header if there are disclosures
     if (disclosures.length > 0) {
@@ -276,9 +281,12 @@ export const Holder = {
 
     // Build SD-KBT protected headers
     // REQUIRED: typ, alg, kcwt (containing SD-CWT)
+    // The CDDL declares `&(kcwt: 13) ^ => sd-cwt-issued`, and sd-cwt-issued is
+    // `#6.18([...])`, so kcwt holds the embedded COSE_Sign1 structure itself.
+    // Passing the encoded bytes would nest the SD-CWT inside a bstr instead.
     const kbtProtectedHeaders = new Map([
-      [sdCwt.HeaderParam.Typ, sdCwt.MediaType.KbCwt],
-      [sdCwt.HeaderParam.Kcwt, sdCwtWithDisclosures],
+      [sdCwt.HeaderParam.Typ, sdCwt.ContentFormat.KbCwt],
+      [sdCwt.HeaderParam.Kcwt, cbor.decode(sdCwtWithDisclosures, sdCwt.cborDecodeOptions)],
     ]);
 
     // Encode the payload
@@ -364,9 +372,16 @@ function embedDisclosuresInToken(token, disclosures) {
   const payload = copyBytes(payloadRaw);
   const signature = copyBytes(signatureRaw);
   
-  // Add disclosures to unprotected header
+  // Add disclosures to unprotected header.
+  // Section 4: "If the Holder does not disclose any claims, it MUST omit the
+  // `sd_claims` header parameter." An empty array is not the same thing -- a
+  // Verifier is required to treat that as invalid.
   const newUnprotected = unprotectedMap instanceof Map ? new Map(unprotectedMap) : new Map();
-  newUnprotected.set(sdCwt.HeaderParam.SdClaims, disclosures);
+  if (disclosures.length > 0) {
+    newUnprotected.set(sdCwt.HeaderParam.SdClaims, disclosures);
+  } else {
+    newUnprotected.delete(sdCwt.HeaderParam.SdClaims);
+  }
   
   // Re-encode as COSE_Sign1 (tag 18) and return as Uint8Array
   // The kcwt header expects raw CBOR bytes of the CWT
@@ -483,8 +498,8 @@ export const Verifier = {
 
     // Validate SD-KBT typ header
     const kbtTyp = kbtHeaders.protectedHeaders.get(sdCwt.HeaderParam.Typ);
-    if (kbtTyp !== sdCwt.MediaType.KbCwt) {
-      throw new Error(`Invalid SD-KBT: typ must be "${sdCwt.MediaType.KbCwt}", got "${kbtTyp}"`);
+    if (!sdCwt.isKbCwtTyp(kbtTyp)) {
+      throw new Error(`Invalid SD-KBT: typ must be ${sdCwt.ContentFormat.KbCwt} or "${sdCwt.MediaType.KbCwt}", got ${JSON.stringify(kbtTyp)}`);
     }
 
     // Step 2: Verify the SD-CWT signature using Issuer's public key
@@ -506,6 +521,21 @@ export const Verifier = {
       throw new Error('Invalid SD-CWT: no claims in payload or CWT Claims header (15)');
     }
 
+    // Section 9 step 2: "Verifiers MUST treat an `sd_claims` or
+    // `sd_aead_encrypted_claims` unprotected Header Parameter with an empty
+    // array as invalid." Section 4 requires the parameter be omitted instead.
+    for (const label of [sdCwt.HeaderParam.SdClaims, sdCwt.HeaderParam.SdAeadEncryptedClaims]) {
+      if (sdCwtHeaders.unprotectedHeaders.has(label)) {
+        const value = sdCwtHeaders.unprotectedHeaders.get(label);
+        if (Array.isArray(value) && value.length === 0) {
+          throw new Error(
+            `Invalid SD-CWT: header parameter ${label} is an empty array; it MUST be omitted ` +
+            'when nothing is disclosed (per spec Section 4 and Section 9 step 2)'
+          );
+        }
+      }
+    }
+
     // Step 3: Extract the confirmation key from cnf claim
     const cnfClaim = sdCwtClaims.get(sdCwt.ClaimKey.Cnf);
     if (!cnfClaim) {
@@ -520,14 +550,28 @@ export const Verifier = {
     const kbtPayloadBytes = await coseSign1.verify(presentation, holderPublicKey);
     const kbtPayload = cbor.decode(kbtPayloadBytes, sdCwt.cborDecodeOptions);
 
-    // Step 5: Validate SD-KBT has required claims (aud, iat)
+    // Step 5: Validate SD-KBT has required claims (aud, and iat or cti)
+    // Section 8.1: iss and sub are implied by the cnf claim of the embedded
+    // SD-CWT, so repeating them here is superfluous and MUST NOT be done.
+    for (const label of [sdCwt.ClaimKey.Iss, sdCwt.ClaimKey.Sub]) {
+      if (kbtPayload.has(label)) {
+        throw new Error(
+          `Invalid SD-KBT: claim ${label} (iss and sub) MUST NOT be present; both are implied ` +
+          'by the cnf claim of the embedded SD-CWT (per spec Section 8.1)'
+        );
+      }
+    }
+
     const kbtAud = kbtPayload.get(sdCwt.ClaimKey.Aud);
     if (!kbtAud) {
       throw new Error('Invalid SD-KBT: missing aud (3) claim');
     }
+    // Section 8.1: "The KBT payload MUST contain either the `iat` (issued at)
+    // claim, or the `cti` (CWT ID) claim."
     const kbtIat = kbtPayload.get(sdCwt.ClaimKey.Iat);
-    if (kbtIat === undefined) {
-      throw new Error('Invalid SD-KBT: missing iat (6) claim');
+    const kbtCti = kbtPayload.get(sdCwt.ClaimKey.Cti);
+    if (kbtIat === undefined && kbtCti === undefined) {
+      throw new Error('Invalid SD-KBT: MUST contain either the iat (6) or the cti (7) claim');
     }
 
     // Step 6: Validate audience matches
@@ -562,15 +606,26 @@ export const Verifier = {
     // (sdCwtHeaders was already retrieved above for CWT Claims check)
     const disclosures = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdClaims) || [];
 
-    // Validate disclosures match redacted entries
-    const validatedDisclosures = validateDisclosures(sdCwtClaims, disclosures, hashAlgorithm);
-
-    // Reconstruct claims with the provided disclosures
-    const { claims, redactedKeys } = sdCwt.reconstructClaims(
-      sdCwtClaims, 
-      validatedDisclosures, 
+    // Reconstruct claims with the provided disclosures. Every disclosure is
+    // handed to the reconstruction, including ones whose Redacted Claim Hash is
+    // nested inside another redacted claim and so is not yet visible.
+    const { claims, redactedKeys, unusedDisclosures } = sdCwt.reconstructClaims(
+      sdCwtClaims,
+      disclosures,
       { hashAlg: hashAlgorithm, strict }
     );
+
+    // Appendix A step 6: "If there remain unused claims in the Digest To
+    // Disclosed Claim Map at the end of this procedure the SD-CWT MUST be
+    // considered invalid." Checking here rather than before reconstruction is
+    // what makes nested disclosures work.
+    if (unusedDisclosures.length > 0) {
+      const shown = unusedDisclosures.map(u => u.hexKey.slice(0, 16) + '…').join(', ');
+      throw new Error(
+        `Invalid SD-CWT: ${unusedDisclosures.length} disclosure(s) match no Redacted Claim Hash ` +
+        `(${shown}); every disclosure MUST be used (per spec Appendix A step 6)`
+      );
+    }
 
     // Optionally verify that claims are clean
     if (requireClean) {
@@ -722,9 +777,11 @@ function validateDisclosures(redactedClaims, disclosures, hashAlgorithm) {
     const hexHash = Buffer.from(hash).toString('hex');
     
     if (!redactedHashes.has(hexHash)) {
-      // Disclosure doesn't match any redacted entry - this is suspicious
-      // but we'll just filter it out rather than fail completely
-      console.warn('Warning: Disclosure does not match any redacted entry');
+      // Only the hashes visible at this level are known here, so a disclosure
+      // nested under a still-redacted parent legitimately misses. This helper
+      // is a best-effort filter for Holders choosing what to send; the
+      // authoritative "every disclosure MUST be used" check runs after
+      // reconstruction, in Verifier.verify.
       continue;
     }
 

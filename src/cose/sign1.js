@@ -344,8 +344,11 @@ async function signECDSA(data, key, algInfo) {
   };
 
   const privateKey = crypto.createPrivateKey({ key: jwk, format: 'jwk' });
+  // The digest MUST come from the COSE alg, not from the key's default digest.
+  // Passing null makes Node fall back to SHA-256 for every curve, which silently
+  // produces non-conformant ES384/ES512 signatures.
   // Await the signature - browser shim returns a Promise, Node.js returns sync
-  const signature = await crypto.sign(null, data, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  const signature = await crypto.sign(algInfo.hash, data, { key: privateKey, dsaEncoding: 'ieee-p1363' });
   
   return new Uint8Array(signature);
 }
@@ -378,8 +381,9 @@ async function verifyECDSA(data, signature, key, algInfo) {
   const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const sigBuffer = Buffer.from(sigBytes);
   
+  // The digest MUST come from the COSE alg (see signECDSA).
   // Await the result - browser shim returns a Promise, Node.js returns sync
-  return await crypto.verify(null, data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuffer);
+  return await crypto.verify(algInfo.hash, data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuffer);
 }
 
 /**

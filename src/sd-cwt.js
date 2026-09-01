@@ -25,8 +25,8 @@ export const Tag = {
   ToBeRedacted: 58,
   /** Tag 60: Wraps a redacted array element (contains hash) */
   RedactedClaimElement: 60,
-  /** Tag 61: Wraps a decoy value to be inserted */
-  ToBeDecoy: 61,
+  /** Tag 62: Wraps a decoy value to be inserted (IANA registration requested) */
+  ToBeDecoy: 62,
 };
 
 /**
@@ -53,12 +53,12 @@ export const HeaderParam = {
   Typ: 16,
   /** sd_claims: Array of selectively disclosed claims */
   SdClaims: 17,
-  /** sd_alg: Hash algorithm used for redaction */
-  SdAlg: 18,
-  /** sd_aead_encrypted_claims */
-  SdAeadEncryptedClaims: 19,
-  /** sd_aead */
-  SdAead: 20,
+  /** sd_alg: Hash algorithm used for redaction (Section 17.1, label 170) */
+  SdAlg: 170,
+  /** sd_aead_encrypted_claims (Section 17.1, label 171) */
+  SdAeadEncryptedClaims: 171,
+  /** sd_aead (Section 17.1, label 172) */
+  SdAead: 172,
 };
 
 /**
@@ -94,6 +94,38 @@ export const MediaType = {
 };
 
 /**
+ * CoAP Content-Format values for the `typ` header parameter (RFC 7252).
+ *
+ * The spec (sections 4 and 9) says `typ` MUST be either the unsigned integer
+ * content-format or the media type string, and SHOULD be the integer because
+ * its CBOR encoding is much smaller (3 bytes versus 19).
+ */
+export const ContentFormat = {
+  SdCwt: 293,
+  KbCwt: 294,
+};
+
+/**
+ * True if `typ` carries a valid SD-CWT type: 293 or 'application/sd-cwt'.
+ *
+ * @param {number|string} typ - The decoded value of protected header 16
+ * @returns {boolean}
+ */
+export function isSdCwtTyp(typ) {
+  return typ === ContentFormat.SdCwt || typ === MediaType.SdCwt;
+}
+
+/**
+ * True if `typ` carries a valid SD-KBT type: 294 or 'application/kb+cwt'.
+ *
+ * @param {number|string} typ - The decoded value of protected header 16
+ * @returns {boolean}
+ */
+export function isKbCwtTyp(typ) {
+  return typ === ContentFormat.KbCwt || typ === MediaType.KbCwt;
+}
+
+/**
  * Hash algorithms for SD-CWT
  */
 export const SdAlg = {
@@ -106,6 +138,12 @@ export const SdAlg = {
  */
 export const cborDecodeOptions = {
   preferMap: true,
+  // Section 6.4: encoders MUST NOT send indefinite length CBOR and decoders
+  // MUST reject it.
+  rejectStreaming: true,
+  // Section 6.5 and the reconstruction algorithm in Appendix A: an SD-CWT
+  // carrying duplicate map keys is invalid, at any level.
+  rejectDuplicateKeys: true,
 };
 
 /**
@@ -296,15 +334,20 @@ export function createArrayElementDisclosure(salt, value) {
 }
 
 /**
- * Computes the hash of a disclosure
- * 
- * @param {Uint8Array} disclosure - The CBOR-encoded disclosure
+ * Computes the Redacted Claim Hash of a disclosure.
+ *
+ * The CDDL defines the hashed input as `bstr-encoded-salted = bstr .cbor
+ * salted-entry`, so the digest is taken over the CBOR *byte string* -- header
+ * included -- not over the bare `salted-entry` array encoding. Hashing the
+ * array encoding alone yields digests that no other implementation can match.
+ *
+ * @param {Uint8Array} disclosure - The CBOR-encoded salted-entry (bstr contents)
  * @param {string} [algorithm='sha256'] - Hash algorithm to use
  * @returns {Uint8Array} The hash digest
  */
 export function hashDisclosure(disclosure, algorithm = 'sha256') {
   const hash = crypto.createHash(algorithm);
-  hash.update(disclosure);
+  hash.update(cbor.encode(disclosure));
   return new Uint8Array(hash.digest());
 }
 
@@ -477,6 +520,95 @@ function processArrayInternal(array, hashAlg, strict, depth) {
  * @param {string|ProcessOptions} [hashAlgOrOptions='sha256'] - Hash algorithm or options object
  * @returns {{claims: Map, disclosures: Uint8Array[]}} Processed claims and disclosures
  */
+/**
+ * Claim keys whose values the spec requires to be finite numbers.
+ * Section 6.4: "The standard CWT claims `exp`, `nbf`, and `iat` MUST be finite
+ * numbers."
+ */
+const FINITE_NUMBER_CLAIMS = new Set([ClaimKey.Exp, ClaimKey.Nbf, ClaimKey.Iat]);
+
+/**
+ * Validates a pre-issuance Claims Set against the constraints the Issuer must
+ * enforce before signing.
+ *
+ * Checks, recursively at every level:
+ * - no map key carries more than one level of tags (Section 6.5)
+ * - no map holds both a key `k` and that key wrapped in To Be Redacted (6.5)
+ * - `exp`, `nbf` and `iat` are finite numbers (Section 6.4)
+ * - no two keys share a CBOR Preferred Encoding (Section 6.5)
+ *
+ * @param {Map} claims - The pre-issuance Claims Set
+ * @throws {Error} If any constraint is violated
+ */
+export function assertPreIssuanceValid(claims) {
+  const walk = (node, depth) => {
+    if (depth > MAX_DEPTH) {
+      throw new Error(`Claims Set exceeds maximum depth of ${MAX_DEPTH} (per spec Section 6.5)`);
+    }
+
+    if (node instanceof Map) {
+      const plainKeys = new Set();
+      const redactedKeys = new Set();
+      const encodings = new Set();
+
+      for (const [key, value] of node) {
+        if (isToBeRedacted(key) || isToBeDecoy(key)) {
+          const inner = getTagContents(key);
+          if (inner instanceof cbor.Tag) {
+            throw new Error(
+              'Map keys MUST NOT nest multiple levels of tags (per spec Section 6.5)'
+            );
+          }
+          if (isToBeRedacted(key)) {
+            redactedKeys.add(inner);
+          }
+        } else {
+          if (key instanceof cbor.Tag) {
+            throw new Error(
+              'Map keys MUST NOT nest multiple levels of tags (per spec Section 6.5)'
+            );
+          }
+          plainKeys.add(key);
+          if (FINITE_NUMBER_CLAIMS.has(key) && typeof value === 'number' && !Number.isFinite(value)) {
+            throw new Error(
+              `Claim ${key} (exp, nbf and iat) MUST be a finite number (per spec Section 6.4)`
+            );
+          }
+        }
+
+        // Two keys that encode to the same bytes are the same key on the wire.
+        const encoded = Buffer.from(cbor.encode(key)).toString('hex');
+        if (encodings.has(encoded)) {
+          throw new Error(
+            'A CBOR map MUST NOT contain two map keys with the same Preferred Encoding (per spec Section 6.5)'
+          );
+        }
+        encodings.add(encoded);
+
+        walk(value, depth + 1);
+      }
+
+      for (const key of redactedKeys) {
+        if (plainKeys.has(key)) {
+          throw new Error(
+            `A Claims Set MUST NOT contain both the map key ${JSON.stringify(key)} and that key ` +
+            'wrapped in the To Be Redacted tag (per spec Section 6.5)'
+          );
+        }
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        walk(item instanceof cbor.Tag ? getTagContents(item) : item, depth + 1);
+      }
+    }
+  };
+
+  walk(claims, 0);
+}
+
 export function processToBeRedacted(claims, hashAlgOrOptions = 'sha256') {
   const { hashAlg, strict } = normalizeOptions(hashAlgOrOptions);
   const result = processMapInternal(claims, hashAlg, strict, 1);
@@ -635,7 +767,20 @@ function reconstructValueRecursive(value, lookup, strict, depth) {
 export function reconstructClaims(redactedClaims, disclosures, hashAlgOrOptions = 'sha256') {
   const { hashAlg, strict } = normalizeOptions(hashAlgOrOptions);
   const lookup = buildDisclosureLookup(disclosures, hashAlg);
-  return reconstructMapInternal(redactedClaims, lookup, strict, 1);
+  const result = reconstructMapInternal(redactedClaims, lookup, strict, 1);
+
+  // Reconstruction is iterative: revealing one disclosure can expose Redacted
+  // Claim Hashes nested inside it, which later disclosures then match. So a
+  // disclosure can only be judged unused once the whole walk is finished, never
+  // up front against the hashes visible in the outermost map.
+  const unusedDisclosures = [];
+  for (const [hexKey, entry] of lookup) {
+    if (!entry.used && !entry.decoded.isDecoy) {
+      unusedDisclosures.push({ hexKey, disclosure: entry.disclosure, decoded: entry.decoded });
+    }
+  }
+
+  return { ...result, unusedDisclosures };
 }
 
 /**
@@ -671,6 +816,7 @@ function reconstructMapInternal(redactedClaims, lookup, strict, depth) {
       
       if (entry && entry.decoded.claimName !== undefined) {
         // Found matching disclosure - restore the claim
+        entry.used = true;
         const { value: restoredValue, redactedHashes } = reconstructValueRecursive(
           entry.decoded.value, lookup, strict, depth + 1
         );
@@ -727,6 +873,7 @@ function reconstructArrayRecursive(redactedArray, lookup, strict, depth) {
       
       if (entry && entry.decoded.claimName === undefined && !entry.decoded.isDecoy) {
         // Found matching array element disclosure - restore the value
+        entry.used = true;
         const { value: restoredValue, redactedHashes } = reconstructValueRecursive(
           entry.decoded.value, lookup, strict, depth + 1
         );
