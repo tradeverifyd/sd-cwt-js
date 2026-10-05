@@ -142,6 +142,7 @@ Creates a presentation with selected disclosures.
 - **options.holderPrivateKey**: `Map` - Holder's private COSE Key
 - **options.audience**: `string` - Intended verifier
 - **options.nonce**: `string` - Optional replay protection
+- **options.encryptedDisclosures**: `Array` - Optional `{ disclosure, key, keyContext?, nonce? }` entries to send AEAD-encrypted in `sd_aead_encrypted_claims` (171) instead of `sd_claims` (17)
 - **Returns**: `Uint8Array` - The presentation token
 
 ### `Verifier.verify(options)`
@@ -152,12 +153,22 @@ Verifies a presentation and extracts disclosed claims.
 - **options.issuerPublicKey**: `Map` - Issuer's public COSE Key
 - **options.expectedAudience**: `string` - Expected audience claim
 - **options.expectedNonce**: `string` - Expected nonce (optional)
+- **options.aeadKeyResolver**: `({ keyContext, entry, algorithm }) => key | key[] | undefined` - Resolves AEAD keys for encrypted disclosures (optional). Decrypted disclosures are processed like `sd_claims`; entries with no key are returned in `undecryptedDisclosures` so they can be forwarded.
 - **Returns**: `{ verified: boolean, claims: Map }`
 
 ### Claim Markers
 
 - **`toBeRedacted(key)`**: Marks a claim key or array element as redactable
 - **`toBeDecoy(count)`**: Adds decoy digests to hide redaction count (per §10 of spec)
+
+### Encrypted Disclosures
+
+`encryptDisclosure(disclosure, key, { algorithm?, nonce?, keyContext? })` and
+`decryptDisclosure(entry, key, { algorithm? })` implement the AEAD encrypted
+disclosures of the spec's Encrypted Disclosures section. Supported algorithms
+(`AeadAlgorithm`): AES-128-GCM (1, the default), AES-256-GCM (2), and
+ChaCha20-Poly1305 (29, Node.js only). The plaintext is the disclosure's bstr
+encoding, header included, matching the draft's example byte for byte.
 
 ## Browser Usage
 
@@ -184,6 +195,7 @@ sd-cwt-js/
 ├── src/           # Source modules
 │   ├── api.js     # High-level Issuer/Holder/Verifier API
 │   ├── sd-cwt.js  # Core SD-CWT implementation
+│   ├── aead.js    # AEAD encrypted disclosures
 │   └── cose-sign1.js  # COSE signing operations
 ├── tests/         # Test suites
 ├── docs/          # Interactive sandbox

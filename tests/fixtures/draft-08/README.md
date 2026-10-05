@@ -12,6 +12,8 @@ at `draft-ietf-spice-sd-cwt-08`.
 | `nested_issuer_cwt.cbor` | Issued SD-CWT with fifteen disclosures, nested |
 | `nested_cwt.cbor` | Narrowed nested SD-CWT, seven disclosures |
 | `nested_kbt.cbor` | Nested SD-KBT presentation |
+| `aead_kbt.js.cbor` | Not from the draft: `issuer_cwt.cbor` presented with the Appendix C Holder key, disclosure 501 AEAD-encrypted with the Section 13 key and nonce (its 171 entry equals the draft example). Regenerate with `node scripts/generate-aead-fixture.js` |
+| `aead_kbt.cbor` | The same presentation produced by the python implementation, [tradeverifyd/sd-cwt](https://github.com/tradeverifyd/sd-cwt), checked in as a cross-implementation fixture |
 
 A decoy disclosure is a one-element array holding only a salt. Its digest sits
 in the payload like any other Redacted Claim Hash, so the count of redacted
