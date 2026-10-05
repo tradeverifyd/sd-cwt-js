@@ -14,6 +14,7 @@
 import * as cbor from 'cbor2';
 import * as coseSign1 from './cose-sign1.js';
 import * as sdCwt from './sd-cwt.js';
+import * as aead from './aead.js';
 
 // Re-export key utilities
 export { toBeRedacted, toBeDecoy, MAX_DEPTH, validateClaimsClean, assertClaimsClean, assertPreIssuanceValid, ClaimKey, MediaType, ContentFormat, isSdCwtTyp, isKbCwtTyp, HeaderParam } from './sd-cwt.js';
@@ -32,6 +33,12 @@ export {
   coseKeyToHex,
   coseKeyFromHex,
 } from './cose-sign1.js';
+export {
+  AeadAlgorithm,
+  encryptDisclosure,
+  decryptDisclosure,
+  parseEncryptedDisclosure,
+} from './aead.js';
 
 /**
  * SD-CWT Issuer API
@@ -238,9 +245,13 @@ export const Holder = {
    * @param {string} options.audience - The intended verifier (aud claim) - REQUIRED
    * @param {Uint8Array|Buffer} [options.nonce] - Optional nonce from verifier (cnonce claim)
    * @param {string} [options.algorithm='ES256'] - Signing algorithm
+   * @param {Array<{disclosure: Uint8Array, key: Uint8Array, keyContext?: number|string|Uint8Array, nonce?: Uint8Array}>} [options.encryptedDisclosures]
+   *   Disclosures to present encrypted, in `sd_aead_encrypted_claims` (171), per spec Section 13.
+   *   Any of these that also appear in selectedDisclosures are sent only in encrypted form.
+   *   The AEAD algorithm is the SD-CWT's `sd_aead` (172) protected header, or AES-128-GCM.
    * @returns {Promise<Buffer>} The signed SD-KBT presentation
    */
-  async present({ token, selectedDisclosures, holderPrivateKey, audience, nonce, algorithm = 'ES256' }) {
+  async present({ token, selectedDisclosures = [], holderPrivateKey, audience, nonce, algorithm = 'ES256', encryptedDisclosures = [] }) {
     if (!audience) {
       throw new Error('audience (aud) is REQUIRED in SD-KBT per spec Section 8.1');
     }
@@ -262,7 +273,19 @@ export const Holder = {
 
     // Build the SD-CWT with disclosures in unprotected header
     // We need to re-encode the SD-CWT with disclosures in the unprotected header
-    const sdCwtWithDisclosures = embedDisclosuresInToken(tokenBytes, disclosureBytes);
+    // Section 13: the Holder MAY encrypt some disclosures, omitting their
+    // plaintext from sd_claims and adding them to sd_aead_encrypted_claims.
+    const aeadAlgorithm = aead.aeadAlgorithmFromHeaders(coseSign1.getHeaders(tokenBytes).protectedHeaders);
+    const encryptedEntries = [];
+    const encryptedHex = new Set();
+    for (const { disclosure, key, keyContext, nonce: aeadNonce } of encryptedDisclosures) {
+      const bytes = copyBytes(disclosure);
+      encryptedHex.add(Buffer.from(bytes).toString('hex'));
+      encryptedEntries.push(await aead.encryptDisclosure(bytes, key, { algorithm: aeadAlgorithm, nonce: aeadNonce, keyContext }));
+    }
+    const plaintextDisclosures = disclosureBytes.filter(d => !encryptedHex.has(Buffer.from(d).toString('hex')));
+
+    const sdCwtWithDisclosures = embedDisclosuresInToken(tokenBytes, plaintextDisclosures, encryptedEntries);
 
     // Build SD-KBT payload per spec Section 8.1
     // REQUIRED: aud (3), iat (6)
@@ -359,7 +382,7 @@ function copyBytes(data) {
   return data;
 }
 
-function embedDisclosuresInToken(token, disclosures) {
+function embedDisclosuresInToken(token, disclosures, encryptedEntries = []) {
   // Decode the COSE_Sign1 structure
   const decoded = cbor.decode(token, sdCwt.cborDecodeOptions);
   const coseArray = decoded.contents || decoded;
@@ -381,6 +404,12 @@ function embedDisclosuresInToken(token, disclosures) {
     newUnprotected.set(sdCwt.HeaderParam.SdClaims, disclosures);
   } else {
     newUnprotected.delete(sdCwt.HeaderParam.SdClaims);
+  }
+  // The same rule applies to sd_aead_encrypted_claims (Section 9 step 2).
+  if (encryptedEntries.length > 0) {
+    newUnprotected.set(sdCwt.HeaderParam.SdAeadEncryptedClaims, encryptedEntries);
+  } else {
+    newUnprotected.delete(sdCwt.HeaderParam.SdAeadEncryptedClaims);
   }
   
   // Re-encode as COSE_Sign1 (tag 18) and return as Uint8Array
@@ -458,7 +487,13 @@ export const Verifier = {
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
    * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
    * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
-   * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], sdCwtClaims: Map, kbtPayload: Map, headers: Object}>} Verified result
+   * @param {function({keyContext?: number|string|Uint8Array, entry: Array, algorithm: number}): (Uint8Array|Uint8Array[]|undefined|Promise<Uint8Array|Uint8Array[]|undefined>)} [options.aeadKeyResolver]
+   *   Resolves the AEAD key (or candidate keys) for an `sd_aead_encrypted_claims` (171) entry,
+   *   per spec Section 13. Decrypted disclosures are processed exactly as if they were in
+   *   `sd_claims`. Entries for which no key is returned are left encrypted and reported in
+   *   `undecryptedDisclosures`, so an initial Verifier can forward them. If keys are returned
+   *   and none of them decrypts the entry, verification fails.
+   * @returns {Promise<{claims: Map, redactedKeys: Uint8Array[], sdCwtClaims: Map, kbtPayload: Map, headers: Object, decryptedDisclosures: Uint8Array[], undecryptedDisclosures: Array[]}>} Verified result
    * @throws {Error} If verification fails
    * 
    * @example
@@ -468,7 +503,7 @@ export const Verifier = {
    *   expectedAudience: 'https://verifier.example/app',
    * });
    */
-  async verify({ presentation, issuerPublicKey, expectedAudience, expectedNonce, hashAlgorithm = 'sha256', strict = false, requireClean = false }) {
+  async verify({ presentation, issuerPublicKey, expectedAudience, expectedNonce, hashAlgorithm = 'sha256', strict = false, requireClean = false, aeadKeyResolver }) {
     if (!expectedAudience) {
       throw new Error('expectedAudience is REQUIRED per spec Section 9 Step 6');
     }
@@ -604,7 +639,20 @@ export const Verifier = {
 
     // Step 7: Extract disclosures from SD-CWT unprotected header
     // (sdCwtHeaders was already retrieved above for CWT Claims check)
-    const disclosures = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdClaims) || [];
+    const plaintextDisclosures = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdClaims) || [];
+
+    // Section 13: decrypt what we can of sd_aead_encrypted_claims and process
+    // it as if it had been in sd_claims.
+    const { decryptedDisclosures, undecryptedDisclosures } = await decryptAeadDisclosures(
+      sdCwtHeaders, aeadKeyResolver
+    );
+    const plaintextHex = new Set(plaintextDisclosures.map(d => Buffer.from(d).toString('hex')));
+    for (const d of decryptedDisclosures) {
+      if (plaintextHex.has(Buffer.from(d).toString('hex'))) {
+        throw new Error('Invalid SD-CWT: a disclosure is present both in sd_claims and in sd_aead_encrypted_claims');
+      }
+    }
+    const disclosures = [...plaintextDisclosures, ...decryptedDisclosures];
 
     // Reconstruct claims with the provided disclosures. Every disclosure is
     // handed to the reconstruction, including ones whose Redacted Claim Hash is
@@ -638,6 +686,8 @@ export const Verifier = {
     return {
       claims,
       redactedKeys,
+      decryptedDisclosures,   // Disclosures recovered from sd_aead_encrypted_claims (171)
+      undecryptedDisclosures, // 171 entries with no available key, still encrypted
       sdCwtClaims, // Original SD-CWT claims (for inspection)
       kbtPayload,  // SD-KBT payload (aud, iat, cnonce)
       headers: {
@@ -709,6 +759,55 @@ export const Verifier = {
     };
   },
 };
+
+/**
+ * Decrypts the `sd_aead_encrypted_claims` (171) entries of an SD-CWT.
+ *
+ * Every entry is shape-checked whether or not a key is available, so a
+ * malformed header is rejected even by a Verifier that cannot decrypt it.
+ *
+ * @param {{protectedHeaders: Map, unprotectedHeaders: Map}} sdCwtHeaders
+ * @param {Function} [aeadKeyResolver]
+ * @returns {Promise<{decryptedDisclosures: Uint8Array[], undecryptedDisclosures: Array[]}>}
+ */
+async function decryptAeadDisclosures(sdCwtHeaders, aeadKeyResolver) {
+  const entries = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdAeadEncryptedClaims);
+  const decryptedDisclosures = [];
+  const undecryptedDisclosures = [];
+  if (entries === undefined) {
+    return { decryptedDisclosures, undecryptedDisclosures };
+  }
+  if (!Array.isArray(entries)) {
+    throw new Error('Invalid SD-CWT: sd_aead_encrypted_claims (171) must be an array');
+  }
+
+  const algorithm = aead.aeadAlgorithmFromHeaders(sdCwtHeaders.protectedHeaders);
+  for (const entry of entries) {
+    const { keyContext } = aead.parseEncryptedDisclosure(entry, algorithm);
+    const resolved = aeadKeyResolver ? await aeadKeyResolver({ keyContext, entry, algorithm }) : undefined;
+    const keys = resolved === undefined || resolved === null ? [] : (Array.isArray(resolved) ? resolved : [resolved]);
+    if (keys.length === 0) {
+      undecryptedDisclosures.push(entry);
+      continue;
+    }
+
+    let disclosure;
+    let lastError;
+    for (const key of keys) {
+      try {
+        disclosure = await aead.decryptDisclosure(entry, key, { algorithm });
+        break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    if (!disclosure) {
+      throw new Error(`Invalid SD-CWT: AEAD encrypted disclosure could not be decrypted (${lastError.message})`);
+    }
+    decryptedDisclosures.push(disclosure);
+  }
+  return { decryptedDisclosures, undecryptedDisclosures };
+}
 
 /**
  * Extracts a public key from a cnf claim structure
