@@ -15,7 +15,7 @@ export function validatePresentationClaims(credential, presentation, audience, n
   if (!presentation.has(3) || presentation.has(1) || presentation.has(2)) throw new Error('Invalid KBT registered claims');
   if (!presentation.has(6) && (!presentation.has(7) || presentation.has(4) || presentation.has(5))) throw new Error('KBT requires iat or cti; exp/nbf require iat');
   if (presentation.has(7) && !(presentation.get(7) instanceof Uint8Array)) throw new Error('cti must be a byte string');
-  for (const [p,c,relation] of [[4,4,'max'],[5,5,'min'],[6,6,'min'],[6,5,'min'],[6,4,'max'],[5,4,'strictmax']]) {
+  for (const [p,c,relation] of [[4,4,'max'],[5,5,'min'],[6,6,'min'],[6,5,'min'],[6,4,'strictmax'],[5,4,'strictmax']]) {
     if (presentation.has(p) && credential.has(c)) {
       const a = presentation.get(p), b = credential.get(c);
       if ((relation === 'max' && a > b) || (relation === 'min' && a < b) || (relation === 'strictmax' && a >= b)) throw new Error('KBT time lies outside credential validity');

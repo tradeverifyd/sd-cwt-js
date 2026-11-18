@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as sign1 from '../src/cose/sign1.js';
-import cose from 'cose-js';
+import cose from './cose-js-compat.js';
 
 describe('COSE Sign1 Implementation', () => {
 

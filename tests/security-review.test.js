@@ -51,7 +51,7 @@ describe('security review: authenticated adversarial inputs', () => {
 
 describe('security review: policy boundaries and controls', () => {
   it('enforces the exact expiry boundary with explicit clock skew', async () => {
-    const t = await token({claims:[[4,NOW]]});
+    const t = await token({claims:[[4,NOW]], kbt:[[6,NOW-1]]});
     await assert.rejects(() => verify(t, {now:NOW}));
     await verify(t, {now:NOW, leeway:1});
   });
@@ -78,4 +78,9 @@ describe('security review: policy boundaries and controls', () => {
     const hashes = new Map([[new cbor.Simple(59),[sd.hashDisclosure(d)]]]);
     assert.throws(() => sd.reconstructClaims(new Map([['a',hashes],['b',hashes]]),[d]));
   });
+});
+
+it('requires KBT issuance strictly before issuer expiry even with leeway', async () => {
+  await verify(await token({claims:[[4,NOW]], kbt:[[6,NOW-1]]}), {now:NOW,leeway:10});
+  await assert.rejects(() => token({claims:[[4,NOW]], kbt:[[6,NOW]]}).then(t => verify(t,{now:NOW,leeway:10})));
 });

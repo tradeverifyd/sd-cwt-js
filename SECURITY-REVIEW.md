@@ -47,21 +47,32 @@ fails closed instead of silently diverging from the signed header.
 
 ## Validation and residual scope
 
-- Full suite: **532/532 passed on Node 20 and Node 24**.
-- Local Node 26 still reproduces the five pre-existing `cose-js` dependency/sanity
-  failures. This PR does not claim Node 26 support or hide those tests.
+- Full suite: **534/534 passed on Node 20, Node 24, and Node 26**.
+- The five Node 26 failures were isolated to legacy `cbor`'s synchronous
+  pipe-to-NoFilter encoder in the development-only `cose-js` oracle. The test-only
+  `cose-js-compat.js` helper collects that encoder's output chunks directly when
+  a fixed-byte probe detects truncation. It retains the independent encoder and
+  cryptographic implementation, does not translate wire formats, and does not
+  skip tests. Fixed-byte and large-payload regressions cover the collector.
 - `npm run build` succeeded.
 - Cross-implementation profile runner: **316/316 passed** with explicit historical
   clocks; Rust participates in the cases supported by its existing adapter.
 - `npm audit --omit=dev`: **zero reported production advisories** at review time.
-- Added a PR job on Node 20/24 for AEAD and security regressions; the deployment
-  workflow continues running the full suite. Hosted CI results are separate from
-  these local executions.
+- PR CI now runs the complete test suite and build on Node 20/24/26.
+- Updated esbuild and the transitive bn.js development dependency. The full npm
+  audit retains two low-severity findings for elliptic/cose-js (one underlying
+  advisory); no fixed elliptic version is available in the audit. Do not downgrade
+  the independent oracle to an obsolete COSE implementation merely to clear it.
+- Added a signed regression requiring KBT `iat < credential exp` even with leeway.
+- Expanded Rust interop covers nested/array Holder production, 32/48/64-byte
+  contexts, and AES-256. It exposes a real non-default algorithm gap: Rust
+  reads/writes header 172 in unprotected headers. Our protected-header and
+  duplicate-header checks remain enforced.
 
 Advisory matching does not prove dependency security. This review does not establish
 exhaustive fuzzing coverage, resistance to all input/resource exhaustion, complete
 algorithm coverage, or stateful replay prevention. Applications must enforce
 trusted-issuer policy, required claims, revocation, maximum lifetime where needed,
 nonce/cti replay state, and input/resource limits. A required critical claim cannot
-be left undisclosed. Mixed parent/descendant encryption, alternative hashes, and
+be left undisclosed. Alternative hashes, complete claims-in-header profiles, and
 Rust's protected/unprotected header-172 difference remain separate interop work.
