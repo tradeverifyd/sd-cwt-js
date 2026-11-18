@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import cose from 'cose-js';
+import cose, { legacyCbor } from './cose-js-compat.js';
 import crypto from 'node:crypto';
 
 describe('cose-js sanity tests', () => {
@@ -95,4 +95,14 @@ describe('cose-js sanity tests', () => {
     });
   });
 
+});
+
+// Fixed bytes verify the collector retains every chunk, including nested headers.
+it('legacy CBOR oracle preserves complete wire bytes', () => {
+  const value = [new Map([[1, -7]]), Buffer.from([0, 1, 2]), [1, 2, 3]];
+  const encoded = legacyCbor.encode(value);
+  assert.equal(encoded.toString('hex'), '83a101264300010283010203');
+  assert.equal(legacyCbor.decodeFirstSync(encoded)[1].toString('hex'), '000102');
+  const large = Buffer.alloc(128 * 1024, 0xa5);
+  assert.deepEqual(legacyCbor.decodeFirstSync(legacyCbor.encode(large)), large);
 });

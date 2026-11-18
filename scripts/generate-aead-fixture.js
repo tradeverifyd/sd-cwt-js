@@ -44,6 +44,7 @@ const plaintext = all.filter(d => [1549560720, 'region'].includes(labelOf(d)));
 
 const kbt = await Holder.present({
   token: issued,
+  issuedAt: 1725244300, // historical draft validity window
   selectedDisclosures: plaintext,
   encryptedDisclosures: [{ disclosure: first, key: AEAD_KEY, nonce: AEAD_NONCE }],
   holderPrivateKey: HOLDER_PRIVATE_KEY,

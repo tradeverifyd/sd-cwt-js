@@ -1,3 +1,4 @@
+import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
  * Browser Compatibility Tests
  * 
@@ -129,7 +130,7 @@ describe('Browser Compatibility - Spec Keys', () => {
     
     // Step 3: Create presentation (without nonce for simplicity)
     console.log('\n=== Step 3: Create Presentation ===');
-    const presentation = await Holder.present({
+    const presentation = await presentFixture({
       token,
       selectedDisclosures: disclosures, // Disclose all
       holderPrivateKey,
@@ -143,7 +144,7 @@ describe('Browser Compatibility - Spec Keys', () => {
     
     // Step 4: Verify presentation
     console.log('\n=== Step 4: Verify Presentation ===');
-    const result = await Verifier.verify({
+    const result = await verifyFixture({
       presentation,
       issuerPublicKey,
       expectedAudience: 'https://verifier.example',
@@ -227,7 +228,7 @@ describe('Browser Compatibility - Spec Keys', () => {
       algorithm: 'ES384',
     });
     
-    const presentation = await Holder.present({
+    const presentation = await presentFixture({
       token,
       selectedDisclosures: disclosures,
       holderPrivateKey,
@@ -238,7 +239,7 @@ describe('Browser Compatibility - Spec Keys', () => {
     // Verification should fail with wrong audience
     await assert.rejects(
       async () => {
-        await Verifier.verify({
+        await verifyFixture({
           presentation,
           issuerPublicKey,
           expectedAudience: 'https://wrong-verifier.example',
@@ -282,7 +283,7 @@ describe('Browser Compatibility - Generated Keys', () => {
     });
     
     // Present
-    const presentation = await Holder.present({
+    const presentation = await presentFixture({
       token,
       selectedDisclosures: disclosures,
       holderPrivateKey: holderKeyPair.privateKey,
@@ -291,7 +292,7 @@ describe('Browser Compatibility - Generated Keys', () => {
     });
     
     // Verify
-    const result = await Verifier.verify({
+    const result = await verifyFixture({
       presentation,
       issuerPublicKey: issuerKeyPair.publicKey,
       expectedAudience: 'https://verifier.example',

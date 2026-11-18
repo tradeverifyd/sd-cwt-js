@@ -1,3 +1,4 @@
+import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
  * AEAD encrypted disclosures (draft-ietf-spice-sd-cwt-08, Section 13).
  *
@@ -9,6 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
+import { createCipheriv } from 'node:crypto';
 
 import * as cbor from 'cbor2';
 import {
@@ -58,7 +60,7 @@ const disclosureFor = label => ALL.find(d => labelOf(d) === label);
 const keyFor = key => () => key;
 
 async function present(options) {
-  return Holder.present({
+  return presentFixture({
     token: ISSUED,
     holderPrivateKey: HOLDER_PRIVATE_KEY,
     audience: AUDIENCE,
@@ -216,7 +218,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
       encryptedDisclosures: [{ disclosure: disclosureFor(501), key: AEAD_KEY, keyContext: 'rp-1' }],
     });
     const seen = [];
-    const { claims, decryptedDisclosures, undecryptedDisclosures } = await Verifier.verify({
+    const { claims, decryptedDisclosures, undecryptedDisclosures } = await verifyFixture({
       presentation: kbt,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -234,7 +236,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
 
   it('tries each candidate key the resolver returns', async () => {
     const kbt = await present({ encryptedDisclosures: [{ disclosure: disclosureFor(501), key: AEAD_KEY }] });
-    const { claims } = await Verifier.verify({
+    const { claims } = await verifyFixture({
       presentation: kbt,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -249,7 +251,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
       encryptedDisclosures: [{ disclosure: disclosureFor(501), key: AEAD_KEY }],
     });
     for (const aeadKeyResolver of [undefined, () => undefined]) {
-      const { claims, undecryptedDisclosures } = await Verifier.verify({
+      const { claims, undecryptedDisclosures } = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: AUDIENCE,
@@ -263,7 +265,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
 
   it('rejects when the resolved key does not decrypt', async () => {
     const kbt = await present({ encryptedDisclosures: [{ disclosure: disclosureFor(501), key: AEAD_KEY }] });
-    await assert.rejects(() => Verifier.verify({
+    await assert.rejects(() => verifyFixture({
       presentation: kbt,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -274,7 +276,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
   it('rejects a decrypted disclosure that matches no Redacted Claim Hash', async () => {
     const stray = sdCwt.createSaltedDisclosure(new Uint8Array(16), 'forged', 501);
     const kbt = await present({ encryptedDisclosures: [{ disclosure: stray, key: AEAD_KEY }] });
-    await assert.rejects(() => Verifier.verify({
+    await assert.rejects(() => verifyFixture({
       presentation: kbt,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -285,7 +287,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
   it('rejects a disclosure sent both in plaintext and encrypted', async () => {
     const kbt = await present({ selectedDisclosures: [disclosureFor(501)] });
     const both = await withSdCwtUnprotected(kbt, u => u.set(171, [DRAFT_ENTRY]));
-    await assert.rejects(() => Verifier.verify({
+    await assert.rejects(() => verifyFixture({
       presentation: both,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -296,7 +298,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
   it('rejects an empty sd_aead_encrypted_claims', async () => {
     const kbt = await present({ selectedDisclosures: [disclosureFor(501)] });
     const empty = await withSdCwtUnprotected(kbt, u => u.set(171, []));
-    await assert.rejects(() => Verifier.verify({
+    await assert.rejects(() => verifyFixture({
       presentation: empty,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -306,7 +308,7 @@ describe('AEAD encrypted disclosures: Holder and Verifier', () => {
   it('rejects a malformed entry even without a key', async () => {
     const kbt = await present({ selectedDisclosures: [disclosureFor(501)] });
     const bad = await withSdCwtUnprotected(kbt, u => u.set(171, [[AEAD_NONCE.slice(0, 8), DRAFT_ENTRY[1], DRAFT_ENTRY[2]]]));
-    await assert.rejects(() => Verifier.verify({
+    await assert.rejects(() => verifyFixture({
       presentation: bad,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -332,7 +334,7 @@ describe('AEAD encrypted disclosures: interop fixtures', () => {
       assert.strictEqual(toHex(entries[0][1]), AEAD_CIPHERTEXT, 'the 171 entry is the draft example');
       assert.strictEqual(toHex(entries[0][2]), AEAD_TAG);
 
-      const { claims, decryptedDisclosures } = await Verifier.verify({
+      const { claims, decryptedDisclosures } = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: AUDIENCE,
@@ -343,4 +345,96 @@ describe('AEAD encrypted disclosures: interop fixtures', () => {
     });
   }
 
+});
+
+
+describe('duplicate encrypted disclosures', () => {
+  for (const freshNonce of [false, true]) {
+    it(`rejects duplicate recovered plaintext (fresh nonce: ${freshNonce})`, async () => {
+      const kbt = await present({ encryptedDisclosures: [{ disclosure: FIRST_DISCLOSURE, key: AEAD_KEY }] });
+      const second = freshNonce ? await encryptDisclosure(FIRST_DISCLOSURE, AEAD_KEY) : undefined;
+      const duplicate = await withSdCwtUnprotected(kbt, u => {
+        const entries = u.get(171);
+        entries.push(second ?? entries[0]);
+      });
+      await assert.rejects(() => verifyFixture({
+        presentation: duplicate,
+        issuerPublicKey: ISSUER_PUBLIC_KEY,
+        expectedAudience: AUDIENCE,
+        aeadKeyResolver: keyFor(AEAD_KEY),
+      }), /duplicate decrypted disclosure/);
+      const result = await verifyFixture({
+        presentation: duplicate,
+        issuerPublicKey: ISSUER_PUBLIC_KEY,
+        expectedAudience: AUDIENCE,
+      });
+      assert.ok(!result.claims.has(501));
+    });
+  }
+});
+
+
+describe('nested and multi-recipient Python presentations', () => {
+  // Generated by the draft repository's interop/run_profiles.py.
+  for (const withKey of [false, true]) {
+    it(`preserves nested maps and array positions (key: ${withKey})`, async () => {
+      const { claims } = await verifyFixture({
+        presentation: read('nested_aead.python.cbor'),
+        issuerPublicKey: ISSUER_PUBLIC_KEY, expectedAudience: AUDIENCE,
+        aeadKeyResolver: withKey ? keyFor(AEAD_KEY) : undefined,
+      });
+      claims.delete(8); // cnf was used to verify the holder signature.
+      const expected = new Map([[1, 'https://issuer.example'], [2, 'https://holder.example'],
+        [500, true], ['items', ['public']]]);
+      if (withKey) {
+        expected.set('profile', new Map([['public', true], ['city', 'private city']]));
+        expected.get('items').push(new Map([['kind', 'secret']]));
+      }
+      assert.deepStrictEqual(claims, expected);
+    });
+  }
+  for (const recipient of ['both', 'a', 'b', 'neither']) {
+    it(`routes two contexts to recipient ${recipient}`, async () => {
+      const { claims } = await verifyFixture({
+        presentation: read('two_key_aead.python.cbor'),
+        issuerPublicKey: ISSUER_PUBLIC_KEY, expectedAudience: AUDIENCE,
+        aeadKeyResolver: ({ keyContext }) => {
+          if (keyContext instanceof Uint8Array && toHex(keyContext) === toHex(Uint8Array.from({ length: 32 }, (_, i) => i))) {
+            return ['both', 'a'].includes(recipient) ? AEAD_KEY : undefined;
+          }
+          if (keyContext === 'recipient-b') return ['both', 'b'].includes(recipient) ? Uint8Array.from({ length: 16 }, (_, i) => i) : undefined;
+        },
+      });
+      assert.strictEqual(claims.has(501), ['both', 'a'].includes(recipient));
+      assert.strictEqual(claims.get(503).has('region'), ['both', 'b'].includes(recipient));
+      assert.strictEqual(claims.get(503).get('postal_code'), '94188');
+      assert.deepStrictEqual(claims.get(502), [1549560720, 1612560720, 1674004740]);
+    });
+  }
+});
+
+
+describe('authenticated malformed plaintext and AAD', () => {
+  const wrapped = cbor.encode(FIRST_DISCLOSURE);
+  const cases = [
+    ['invalid CBOR', Uint8Array.of(0xff)],
+    ['trailing item', Uint8Array.from([...wrapped, 0])],
+    ['non-preferred bstr', Uint8Array.from([0x59, 0, 0x21, ...FIRST_DISCLOSURE])],
+    ['indefinite bstr', Uint8Array.from([0x5f, ...wrapped, 0xff])],
+  ];
+  for (const [name, plaintext] of cases) {
+    it(`rejects ${name} even with an authentic tag`, async () => {
+      const nonce = new Uint8Array(12);
+      const cipher = createCipheriv('aes-128-gcm', AEAD_KEY, nonce);
+      const ciphertext = new Uint8Array(Buffer.concat([cipher.update(plaintext), cipher.final()]));
+      await assert.rejects(() => decryptDisclosure([nonce, ciphertext, new Uint8Array(cipher.getAuthTag())], AEAD_KEY));
+    });
+  }
+  it('rejects a valid ciphertext made with nonempty AAD', async () => {
+    const nonce = new Uint8Array(12);
+    const cipher = createCipheriv('aes-128-gcm', AEAD_KEY, nonce);
+    cipher.setAAD(Buffer.from('wrong aad'));
+    const ciphertext = new Uint8Array(Buffer.concat([cipher.update(wrapped), cipher.final()]));
+    await assert.rejects(() => decryptDisclosure([nonce, ciphertext, new Uint8Array(cipher.getAuthTag())], AEAD_KEY));
+  });
 });
