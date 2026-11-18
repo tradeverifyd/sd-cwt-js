@@ -148,6 +148,12 @@ export async function sign(options) {
   }
 
   // Get algorithm from protected header
+  if (!(protectedHeader instanceof Map) || [...protectedHeader.keys()].some(k => unprotectedHeader.has(k)) || unprotectedHeader.has(2)) throw new Error('Duplicate or unprotected critical header');
+  if (protectedHeader.has(2)) {
+    const critical = protectedHeader.get(2);
+    // Only algorithm semantics are understood by this generic verifier.
+    if (!Array.isArray(critical) || !critical.length || critical.some(k => k !== 1 || !protectedHeader.has(k)) || new Set(critical).size !== critical.length) throw new Error('Unsupported critical header');
+  }
   const alg = protectedHeader.get(HeaderParam.Algorithm);
   if (alg === undefined) {
     throw new Error('Algorithm (1) must be in protected header');
@@ -230,13 +236,15 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
   const decoded = cbor.decode(coseSign1, cborDecodeOptions);
   
   // Handle tagged or untagged
+  if (decoded instanceof cbor.Tag && decoded.tag !== COSE_Sign1_Tag) throw new Error('Invalid COSE_Sign1 tag');
   const structure = decoded instanceof cbor.Tag ? decoded.contents : decoded;
   
   if (!Array.isArray(structure) || structure.length !== 4) {
     throw new Error('Invalid COSE_Sign1 structure');
   }
 
-  const [protectedBytesRaw, , payloadRaw, signatureRaw] = structure;
+  const [protectedBytesRaw, unprotectedHeader, payloadRaw, signatureRaw] = structure;
+  if (![protectedBytesRaw, payloadRaw, signatureRaw].every(v => v instanceof Uint8Array) || !(unprotectedHeader instanceof Map)) throw new Error('Invalid COSE_Sign1 field types');
 
   // Create copies of byte arrays to avoid issues with views over shared buffers
   const protectedBytes = copyBytes(protectedBytesRaw);
@@ -250,6 +258,12 @@ export async function verify(coseSign1, key, externalAad = new Uint8Array(0)) {
     protectedHeader = decodedProtected instanceof Map ? decodedProtected : new Map(Object.entries(decodedProtected));
   }
 
+  if (!(protectedHeader instanceof Map) || [...protectedHeader.keys()].some(k => unprotectedHeader.has(k)) || unprotectedHeader.has(2)) throw new Error('Duplicate or unprotected critical header');
+  if (protectedHeader.has(2)) {
+    const critical = protectedHeader.get(2);
+    // Only algorithm semantics are understood by this generic verifier.
+    if (!Array.isArray(critical) || !critical.length || critical.some(k => k !== 1 || !protectedHeader.has(k)) || new Set(critical).size !== critical.length) throw new Error('Unsupported critical header');
+  }
   const alg = protectedHeader.get(HeaderParam.Algorithm);
   if (alg === undefined) {
     throw new Error('Algorithm not found in protected header');
@@ -295,6 +309,7 @@ export function decode(coseSign1) {
   }
 
   const decoded = cbor.decode(coseSign1, cborDecodeOptions);
+  if (decoded instanceof cbor.Tag && decoded.tag !== COSE_Sign1_Tag) throw new Error('Invalid COSE_Sign1 tag');
   const structure = decoded instanceof cbor.Tag ? decoded.contents : decoded;
   
   if (!Array.isArray(structure) || structure.length !== 4) {

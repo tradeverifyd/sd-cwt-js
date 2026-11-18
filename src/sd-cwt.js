@@ -711,6 +711,7 @@ function buildDisclosureLookup(disclosures, hashAlg = 'sha256') {
     const decoded = decodeDisclosure(disclosure);
     // Use hex string as key for easy Map lookup
     const hexKey = Buffer.from(hash).toString('hex');
+    if (lookup.has(hexKey)) throw new Error('Duplicate disclosure');
     lookup.set(hexKey, { hash, decoded, disclosure });
   }
   return lookup;
@@ -775,7 +776,7 @@ export function reconstructClaims(redactedClaims, disclosures, hashAlgOrOptions 
   // up front against the hashes visible in the outermost map.
   const unusedDisclosures = [];
   for (const [hexKey, entry] of lookup) {
-    if (!entry.used && !entry.decoded.isDecoy) {
+    if (!entry.used) {
       unusedDisclosures.push({ hexKey, disclosure: entry.disclosure, decoded: entry.decoded });
     }
   }
@@ -807,6 +808,7 @@ function reconstructMapInternal(redactedClaims, lookup, strict, depth) {
     }
   }
 
+  const claimKeys = new Set([...resultClaims.keys()].map(k => Buffer.from(cbor.encode(k)).toString('hex')));
   // Process redacted key hashes - match against disclosures
   if (redactedKeyHashes) {
     for (const hash of redactedKeyHashes) {
@@ -814,7 +816,13 @@ function reconstructMapInternal(redactedClaims, lookup, strict, depth) {
       const hexKey = Buffer.from(hashBytes).toString('hex');
       const entry = lookup.get(hexKey);
       
+      if (entry?.used) throw new Error('Repeated disclosure');
+      if (entry?.decoded.isDecoy) { entry.used = true; continue; }
+      if (entry && (entry.used || entry.decoded.claimName === undefined)) throw new Error('Repeated disclosure or map/array shape mismatch');
       if (entry && entry.decoded.claimName !== undefined) {
+        const encodedKey = Buffer.from(cbor.encode(entry.decoded.claimName)).toString('hex');
+        if (claimKeys.has(encodedKey) || isRedactedKeysKey(entry.decoded.claimName)) throw new Error('Duplicate disclosed map key');
+        claimKeys.add(encodedKey);
         // Found matching disclosure - restore the claim
         entry.used = true;
         const { value: restoredValue, redactedHashes } = reconstructValueRecursive(
@@ -871,6 +879,9 @@ function reconstructArrayRecursive(redactedArray, lookup, strict, depth) {
       const hexKey = Buffer.from(hashBytes).toString('hex');
       const entry = lookup.get(hexKey);
       
+      if (entry?.used) throw new Error('Repeated disclosure');
+      if (entry?.decoded.isDecoy) { entry.used = true; continue; }
+      if (entry && (entry.used || entry.decoded.claimName !== undefined)) throw new Error('Repeated disclosure or map/array shape mismatch');
       if (entry && entry.decoded.claimName === undefined && !entry.decoded.isDecoy) {
         // Found matching array element disclosure - restore the value
         entry.used = true;

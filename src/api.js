@@ -1,3 +1,4 @@
+import { validatePresentationClaims } from './verification-policy.js';
 /**
  * SD-CWT High-Level API
  * 
@@ -62,6 +63,7 @@ export const Issuer = {
    * @param {Map} options.claims - Claims map, MUST contain cnf (8) claim with holder's public key
    * @param {Object} options.privateKey - Issuer's private key {d, x, y}
    * @param {string} [options.algorithm='ES256'] - Signing algorithm
+   * @param {number} [options.issuedAt] - Explicit KBT time for a trusted clock or test vector; defaults to now.
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm for redactions
    * @param {string|Buffer} [options.kid] - Key identifier
    * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
@@ -245,13 +247,14 @@ export const Holder = {
    * @param {string} options.audience - The intended verifier (aud claim) - REQUIRED
    * @param {Uint8Array|Buffer} [options.nonce] - Optional nonce from verifier (cnonce claim)
    * @param {string} [options.algorithm='ES256'] - Signing algorithm
+   * @param {number} [options.issuedAt] - Explicit KBT time for a trusted clock or test vector; defaults to now.
    * @param {Array<{disclosure: Uint8Array, key: Uint8Array, keyContext?: number|string|Uint8Array, nonce?: Uint8Array}>} [options.encryptedDisclosures]
    *   Disclosures to present encrypted, in `sd_aead_encrypted_claims` (171), per spec Section 13.
    *   Any of these that also appear in selectedDisclosures are sent only in encrypted form.
    *   The AEAD algorithm is the SD-CWT's `sd_aead` (172) protected header, or AES-128-GCM.
    * @returns {Promise<Buffer>} The signed SD-KBT presentation
    */
-  async present({ token, selectedDisclosures = [], holderPrivateKey, audience, nonce, algorithm = 'ES256', encryptedDisclosures = [] }) {
+  async present({ token, selectedDisclosures = [], holderPrivateKey, audience, nonce, algorithm = 'ES256', encryptedDisclosures = [], issuedAt = Math.floor(Date.now() / 1000) }) {
     if (!audience) {
       throw new Error('audience (aud) is REQUIRED in SD-KBT per spec Section 8.1');
     }
@@ -292,7 +295,7 @@ export const Holder = {
     // OPTIONAL: cnonce (39), exp, nbf
     const kbtPayload = new Map([
       [sdCwt.ClaimKey.Aud, audience],
-      [sdCwt.ClaimKey.Iat, Math.floor(Date.now() / 1000)],
+      [sdCwt.ClaimKey.Iat, issuedAt],
     ]);
 
     if (nonce) {
@@ -487,6 +490,9 @@ export const Verifier = {
    * @param {string} [options.hashAlgorithm='sha256'] - Hash algorithm used
    * @param {boolean} [options.strict=false] - If true, enforce max depth of 16 (per spec section 6.5)
    * @param {boolean} [options.requireClean=false] - If true, verify claims have no remaining SD-CWT artifacts
+   * @param {number} [options.now] - Verification epoch seconds; defaults to the system clock.
+   * @param {number} [options.leeway=0] - Nonnegative finite clock skew in seconds.
+   *   Application profiles must additionally enforce replay/cti state and required claims.
    * @param {function({keyContext?: number|string|Uint8Array, entry: Array, algorithm: number}): (Uint8Array|Uint8Array[]|undefined|Promise<Uint8Array|Uint8Array[]|undefined>)} [options.aeadKeyResolver]
    *   Resolves the AEAD key (or candidate keys) for an `sd_aead_encrypted_claims` (171) entry,
    *   per spec Section 13. Decrypted disclosures are processed exactly as if they were in
@@ -503,7 +509,7 @@ export const Verifier = {
    *   expectedAudience: 'https://verifier.example/app',
    * });
    */
-  async verify({ presentation, issuerPublicKey, expectedAudience, expectedNonce, hashAlgorithm = 'sha256', strict = false, requireClean = false, aeadKeyResolver }) {
+  async verify({ presentation, issuerPublicKey, expectedAudience, expectedNonce, hashAlgorithm = 'sha256', strict = false, requireClean = false, aeadKeyResolver, now = Date.now() / 1000, leeway = 0 }) {
     if (!expectedAudience) {
       throw new Error('expectedAudience is REQUIRED per spec Section 9 Step 6');
     }
@@ -542,6 +548,10 @@ export const Verifier = {
     
     // Get SD-CWT headers to check for claims in protected header (RFC 9597)
     const sdCwtHeaders = coseSign1.getHeaders(sdCwtBytes);
+    if (!sdCwt.isSdCwtTyp(sdCwtHeaders.protectedHeaders.get(sdCwt.HeaderParam.Typ))) throw new Error('Invalid SD-CWT typ');
+    if ((sdCwtHeaders.protectedHeaders.get(sdCwt.HeaderParam.SdAlg) ?? -16) !== -16 || !['sha256', 'sha-256'].includes(hashAlgorithm)) {
+      throw new Error('Unsupported or mismatched disclosure hash algorithm');
+    }
     const cwtClaimsHeader = sdCwtHeaders.protectedHeaders.get(sdCwt.HeaderParam.CwtClaims);
     
     // Claims can be in payload OR in CWT Claims header (15) per RFC 9597
@@ -647,8 +657,14 @@ export const Verifier = {
       sdCwtHeaders, aeadKeyResolver
     );
     const plaintextHex = new Set(plaintextDisclosures.map(d => Buffer.from(d).toString('hex')));
+    const decryptedHex = new Set();
     for (const d of decryptedDisclosures) {
-      if (plaintextHex.has(Buffer.from(d).toString('hex'))) {
+      const hex = Buffer.from(d).toString('hex');
+      if (decryptedHex.has(hex)) {
+        throw new Error('Invalid SD-CWT: duplicate decrypted disclosure');
+      }
+      decryptedHex.add(hex);
+      if (plaintextHex.has(hex)) {
         throw new Error('Invalid SD-CWT: a disclosure is present both in sd_claims and in sd_aead_encrypted_claims');
       }
     }
@@ -674,6 +690,8 @@ export const Verifier = {
         `(${shown}); every disclosure MUST be used (per spec Appendix A step 6)`
       );
     }
+
+    validatePresentationClaims(claims, kbtPayload, expectedAudience, now, leeway, expectedNonce);
 
     // Optionally verify that claims are clean
     if (requireClean) {

@@ -1,3 +1,4 @@
+import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
  * Tests using keys and examples from the SD-CWT specification
  * 
@@ -199,7 +200,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       const expectedAudience = 'https://verifier.example/app';
       const nonce = new Uint8Array(Buffer.from('8c0f5f523b95bea44a9a48c649240803', 'hex'));
 
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -211,7 +212,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.ok(kbt.length > 0);
 
       // Verify the SD-KBT
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience,
@@ -254,7 +255,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES384',
       });
 
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -265,7 +266,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       // Try to verify with holder's key instead of issuer's key
       // This fails because P-256 key can't verify P-384 signature (wrong curve)
       await assert.rejects(
-        Verifier.verify({
+        verifyFixture({
           presentation: kbt,
           issuerPublicKey: HOLDER_KEY.publicKey, // Wrong key!
           expectedAudience: 'https://verifier.example/app',
@@ -288,7 +289,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Attacker tries to present with issuer's key (not holder's key)
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: ISSUER_KEY.privateKey, // Wrong key!
@@ -299,7 +300,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       // Should fail because the KBT signature doesn't match the cnf key
       // The cnf key is P-256 but KBT was signed with P-384
       await assert.rejects(
-        Verifier.verify({
+        verifyFixture({
           presentation: kbt,
           issuerPublicKey: ISSUER_KEY.publicKey,
           expectedAudience: 'https://verifier.example/app',
@@ -481,7 +482,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.strictEqual(disclosures.length, 2);
 
       // Create presentation with selected disclosures
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -528,7 +529,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Create presentation with NO disclosures
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [],  // Empty - don't disclose anything
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -824,7 +825,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.ok(element1Disclosure, 'Should find disclosure for element-1');
 
       // Present with only element-1 disclosed
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [element1Disclosure],
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -832,7 +833,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -866,7 +867,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Present with ALL disclosures
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -874,7 +875,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -908,7 +909,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Present with NO disclosures - undisclosed elements are REMOVED
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -916,7 +917,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1014,7 +1015,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       
       assert.strictEqual(selectedDisclosures.length, 2);
 
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1022,7 +1023,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1072,7 +1073,7 @@ describe('SD-CWT Spec Test Vectors', () => {
 
       // 3. Holder creates presentation
       const nonce = crypto.getRandomValues(new Uint8Array(16));
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1082,7 +1083,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // 4. Verifier validates
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1194,7 +1195,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Create presentation
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1203,7 +1204,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       // Verify should work
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1247,7 +1248,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.strictEqual(arr[2], 'public-date');
 
       // Full verification with disclosures
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1255,7 +1256,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1288,7 +1289,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       assert.strictEqual(disclosures.length, 2);
 
       // Verify with all disclosures
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1296,7 +1297,7 @@ describe('SD-CWT Spec Test Vectors', () => {
         algorithm: 'ES256',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_KEY.publicKey,
         expectedAudience: 'https://verifier.example',
@@ -1326,7 +1327,7 @@ describe('SD-CWT Spec Test Vectors', () => {
 
       // Attempting to verify with wrong key should fail
       // (proving the protected header is integrity-protected)
-      const kbt = await Holder.present({
+      const kbt = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: HOLDER_KEY.privateKey,
@@ -1335,7 +1336,7 @@ describe('SD-CWT Spec Test Vectors', () => {
       });
 
       await assert.rejects(
-        Verifier.verify({
+        verifyFixture({
           presentation: kbt,
           issuerPublicKey: HOLDER_KEY.publicKey, // Wrong key!
           expectedAudience: 'https://verifier.example',

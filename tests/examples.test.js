@@ -1,3 +1,4 @@
+import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
  * Tests for example templates used in the SD-CWT Sandbox
  * 
@@ -66,7 +67,7 @@ describe('Example Templates', () => {
       assert.ok(disclosures.length >= 4, `Should have at least 4 disclosures, got ${disclosures.length}`);
 
       // Present with all disclosures
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: holderKeyPair.privateKey,
@@ -76,7 +77,7 @@ describe('Example Templates', () => {
       assert.ok(presentation instanceof Uint8Array);
 
       // Verify - throws on failure
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -109,14 +110,14 @@ describe('Example Templates', () => {
       });
 
       // Present with only first disclosure
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: [disclosures[0]],
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -186,14 +187,14 @@ describe('Example Templates', () => {
       assert.ok(disclosures.length >= 5, `Expected at least 5 disclosures, got ${disclosures.length}`);
 
       // Present and verify
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -229,14 +230,14 @@ describe('Example Templates', () => {
       assert.strictEqual(disclosures.length, 2, 'Should have 2 cargo disclosures');
 
       // Present with NO cargo disclosures - per SD-CWT spec, undisclosed elements are REMOVED
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -309,14 +310,14 @@ describe('Example Templates', () => {
       assert.ok(disclosures.length >= 8, `Expected at least 8 disclosures, got ${disclosures.length}`);
 
       // Present and verify with all disclosures
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -356,14 +357,14 @@ describe('Example Templates', () => {
       });
 
       // Don't disclose prices - present with no disclosures
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: [],
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'
@@ -404,14 +405,14 @@ describe('Example Templates', () => {
       // 1 actual disclosure (101), decoys don't add to disclosures
       assert.strictEqual(disclosures.length, 1);
 
-      const presentation = await Holder.present({
+      const presentation = await presentFixture({
         token,
         selectedDisclosures: disclosures,
         holderPrivateKey: holderKeyPair.privateKey,
         audience: 'https://verifier.example',
       });
 
-      const result = await Verifier.verify({
+      const result = await verifyFixture({
         presentation,
         issuerPublicKey: issuerKeyPair.publicKey,
         expectedAudience: 'https://verifier.example'

@@ -1,3 +1,4 @@
+import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
  * Conformance tests against the canonical examples in draft-ietf-spice-sd-cwt-08.
  *
@@ -96,7 +97,7 @@ describe('draft-ietf-spice-sd-cwt-08 canonical examples', () => {
     });
 
     it('verifies end to end and reconstructs exactly the disclosed claims', async () => {
-      const { claims, kbtPayload } = await Verifier.verify({
+      const { claims, kbtPayload } = await verifyFixture({
         presentation: KBT,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: AUDIENCE,
@@ -125,7 +126,7 @@ describe('draft-ietf-spice-sd-cwt-08 canonical examples', () => {
     });
 
     it('rejects a presentation aimed at a different audience', async () => {
-      await assert.rejects(() => Verifier.verify({
+      await assert.rejects(() => verifyFixture({
         presentation: KBT,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: 'https://attacker.example',
@@ -133,7 +134,7 @@ describe('draft-ietf-spice-sd-cwt-08 canonical examples', () => {
     });
 
     it('rejects a replayed nonce', async () => {
-      await assert.rejects(() => Verifier.verify({
+      await assert.rejects(() => verifyFixture({
         presentation: KBT,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: AUDIENCE,
@@ -169,7 +170,7 @@ describe('acting as Holder over the draft\'s own credential', () => {
     const selected = all.filter(d => wanted.has(labelOf(d)));
     assert.strictEqual(selected.length, 3);
 
-    const kbt = await Holder.present({
+    const kbt = await presentFixture({
       token: ISSUED,
       selectedDisclosures: selected,
       holderPrivateKey: HOLDER_PRIVATE_KEY,
@@ -178,7 +179,7 @@ describe('acting as Holder over the draft\'s own credential', () => {
       algorithm: 'ES256',
     });
 
-    const { claims } = await Verifier.verify({
+    const { claims } = await verifyFixture({
       presentation: kbt,
       issuerPublicKey: ISSUER_PUBLIC_KEY,
       expectedAudience: AUDIENCE,
@@ -194,7 +195,7 @@ describe('acting as Holder over the draft\'s own credential', () => {
 
   it('produces a kcwt whose embedded SD-CWT is the Issuer\'s bytes, untouched', async () => {
     const all = coseSign1.getHeaders(ISSUED).unprotectedHeaders.get(17);
-    const kbt = await Holder.present({
+    const kbt = await presentFixture({
       token: ISSUED,
       selectedDisclosures: all.filter(d => labelOf(d) === 501),
       holderPrivateKey: HOLDER_PRIVATE_KEY,
@@ -274,7 +275,7 @@ describe('every canonical example in the draft', () => {
 
     it('nested_kbt.cbor verifies end to end', async () => {
       const kbt = read('nested_kbt.cbor');
-      const { claims } = await Verifier.verify({
+      const { claims } = await verifyFixture({
         presentation: kbt,
         issuerPublicKey: ISSUER_PUBLIC_KEY,
         expectedAudience: audienceOf(kbt),
