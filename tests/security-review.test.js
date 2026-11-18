@@ -13,12 +13,12 @@ function key(curve) {
 const issuer = key('P-384'), holder = key('P-256');
 const AUD = 'https://verifier.example/app', NOW = Math.floor(Date.now()/1000);
 const cnf = new Map([[1,new Map([[1,2],[-1,1],[-2,holder.x],[-3,holder.y]])]]);
-async function token({ claims = [], kbt = [], header = [], unprotected = new Map() } = {}) {
+async function token({ claims = [], kbt = [], header = [], unprotected = new Map(), kbtHeader = [] } = {}) {
   const payload = new Map([[1, 'issuer'], [2, 'holder'], [6, NOW-10], [4, NOW+3600], [8, cnf], ...claims]);
   const issued = await cose.sign(cbor.encode(payload), issuer, { algorithm: 'ES384',
     customProtectedHeaders: new Map([[16, 293], [170, -16], ...header]), customUnprotectedHeaders: unprotected });
   return cose.sign(cbor.encode(new Map([[3, AUD], [6, NOW], ...kbt])), holder, {
-    algorithm: 'ES256', customProtectedHeaders: new Map([[16,294], [13,cbor.decode(issued,sd.cborDecodeOptions)]]) });
+    algorithm: 'ES256', customProtectedHeaders: new Map([[16,294], [13,cbor.decode(issued,sd.cborDecodeOptions)], ...kbtHeader]) });
 }
 const verify = (presentation, options = {}) => Verifier.verify({ presentation, issuerPublicKey: issuer, expectedAudience: AUD, ...options });
 
@@ -83,4 +83,15 @@ describe('security review: policy boundaries and controls', () => {
 it('requires KBT issuance strictly before issuer expiry even with leeway', async () => {
   await verify(await token({claims:[[4,NOW]], kbt:[[6,NOW-1]]}), {now:NOW,leeway:10});
   await assert.rejects(() => token({claims:[[4,NOW]], kbt:[[6,NOW]]}).then(t => verify(t,{now:NOW,leeway:10})));
+});
+
+for (const typ of [293, 'application/sd-cwt', 'application/example+sd-cwt']) {
+  it(`accepts the spec credential type ${typ}`, async () => { await verify(await token({header:[[16,typ]]})); });
+}
+for (const typ of ['application/sd+cwt', 'application/+sd-cwt', 'not a media type+sd-cwt']) {
+  it(`rejects incorrect credential type ${typ}`, async () => { await assert.rejects(() => token({header:[[16,typ]]}).then(verify)); });
+}
+
+it('rejects a CWT Claims header in the KBT', async () => {
+  await assert.rejects(() => token({kbtHeader:[[15,new Map([[3,AUD]])]]}).then(verify));
 });

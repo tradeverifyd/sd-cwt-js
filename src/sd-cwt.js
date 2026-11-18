@@ -106,13 +106,14 @@ export const ContentFormat = {
 };
 
 /**
- * True if `typ` carries a valid SD-CWT type: 293 or 'application/sd-cwt'.
+ * True for 293, 'application/sd-cwt', or a media type with the +sd-cwt suffix.
  *
  * @param {number|string} typ - The decoded value of protected header 16
  * @returns {boolean}
  */
 export function isSdCwtTyp(typ) {
-  return typ === ContentFormat.SdCwt || typ === MediaType.SdCwt;
+  return typ === ContentFormat.SdCwt || typ === MediaType.SdCwt ||
+    (typeof typ === 'string' && /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\+sd-cwt$/.test(typ));
 }
 
 /**

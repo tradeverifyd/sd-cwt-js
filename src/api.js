@@ -516,6 +516,7 @@ export const Verifier = {
 
     // Step 1: Parse the SD-KBT and extract the SD-CWT from kcwt header
     const kbtHeaders = coseSign1.getHeaders(presentation);
+    if (kbtHeaders.protectedHeaders.has(15)) throw new Error("CWT Claims header is forbidden in a KBT");
     let sdCwtBytes = kbtHeaders.protectedHeaders.get(sdCwt.HeaderParam.Kcwt);
     
     if (!sdCwtBytes) {
