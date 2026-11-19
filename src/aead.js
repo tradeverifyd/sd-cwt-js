@@ -1,5 +1,5 @@
 /**
- * AEAD Encrypted Disclosures (draft-ietf-spice-sd-cwt-08, Section 13)
+ * AEAD Encrypted Disclosures (draft-ietf-spice-sd-cwt-09, Section 12)
  *
  * A Holder MAY encrypt some of the Salted Disclosed Claims it presents, moving
  * them from `sd_claims` (17) to `sd_aead_encrypted_claims` (171). Each entry is
@@ -9,7 +9,7 @@
  * The plaintext is the CBOR encoding of `bstr .cbor salted-entry` -- the byte
  * string header included -- which is exactly what the Redacted Claim Hash is
  * computed over. The associated data is zero-length. The algorithm is the
- * `sd_aead` (172) protected header of the SD-CWT if present, otherwise
+ * `sd_aead` (172) unprotected header of the SD-CWT if present, otherwise
  * AEAD_AES_128_GCM.
  *
  * AES-GCM runs on Web Crypto, so it works in Node and in the browser bundle.
@@ -30,7 +30,7 @@ export const AeadAlgorithm = {
 };
 
 /**
- * Parameters per supported algorithm. Section 15.2: implementations MUST NOT
+ * Parameters per supported algorithm. Section 16.9: implementations MUST NOT
  * use an AEAD algorithm with a tag shorter than 16 octets, so anything not
  * listed here is refused rather than guessed at.
  */
@@ -84,20 +84,22 @@ export function getAeadParams(algorithm) {
   if (!params) {
     throw new Error(
       `Unsupported AEAD algorithm ${JSON.stringify(algorithm)}; supported: ` +
-      `${Object.keys(PARAMS).join(', ')} (Section 15.2 forbids tags shorter than 16 octets)`
+      `${Object.keys(PARAMS).join(', ')} (Section 16.9 forbids tags shorter than 16 octets)`
     );
   }
   return params;
 }
 
 /**
- * Resolves the AEAD algorithm from an SD-CWT's protected headers.
+ * Resolves the AEAD algorithm from an SD-CWT's unprotected headers.
  *
- * @param {Map} protectedHeaders - SD-CWT protected headers
+ * @param {Map} unprotectedHeaders - SD-CWT unprotected headers
  * @returns {number} The `sd_aead` (172) value, or AEAD_AES_128_GCM if absent
  */
-export function aeadAlgorithmFromHeaders(protectedHeaders) {
-  const value = protectedHeaders instanceof Map ? protectedHeaders.get(172) : undefined;
+export function aeadAlgorithmFromHeaders(unprotectedHeaders) {
+  const value = unprotectedHeaders instanceof Map ? unprotectedHeaders.get(172) : undefined;
+  if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > 65535)) throw new Error('sd_aead must be a uint of at most two bytes');
+  if ((value >= 3 && value <= 14) || [18,19,21,22,24,25,27,28].includes(value)) throw new Error('AEAD algorithm forbidden by draft-09 section 16.9');
   return value === undefined ? DEFAULT_AEAD_ALGORITHM : value;
 }
 
@@ -174,7 +176,7 @@ async function open(params, key, nonce, ciphertext, tag) {
  * @returns {{nonce: Uint8Array, ciphertext: Uint8Array, tag: Uint8Array, keyContext?: number|string|Uint8Array}}
  */
 export function parseEncryptedDisclosure(entry, algorithm = DEFAULT_AEAD_ALGORITHM) {
-  const params = getAeadParams(algorithm);
+  const params = PARAMS[algorithm];
   if (!Array.isArray(entry) || entry.length < 3 || entry.length > 4) {
     throw new Error('Invalid AEAD encrypted disclosure: expected [nonce, ciphertext, tag, ?key-context]');
   }
@@ -184,12 +186,13 @@ export function parseEncryptedDisclosure(entry, algorithm = DEFAULT_AEAD_ALGORIT
       throw new Error(`Invalid AEAD encrypted disclosure: ${name} must be a bstr`);
     }
   }
-  if (nonce.length !== params.nonceLength) {
+  if (params && nonce.length !== params.nonceLength) {
     throw new Error(`Invalid AEAD encrypted disclosure: nonce must be ${params.nonceLength} octets, got ${nonce.length}`);
   }
-  if (tag.length !== params.tagLength) {
-    throw new Error(`Invalid AEAD encrypted disclosure: tag must be ${params.tagLength} octets, got ${tag.length}`);
+  if ((params && tag.length !== params.tagLength) || tag.length < 16) {
+    throw new Error(`Invalid AEAD encrypted disclosure: tag must be ${params ? "16" : "at least 16"} octets, got ${tag.length}`);
   }
+  if ([34,35,36,37].includes(algorithm) && tag.length !== 32) throw new Error('AEGIS X algorithms require 32-byte tags');
   const result = { nonce, ciphertext, tag };
   if (entry.length === 4) {
     const validContext =
@@ -270,4 +273,9 @@ export async function decryptDisclosure(entry, key, { algorithm = DEFAULT_AEAD_A
     throw new Error('Invalid AEAD plaintext: bstr is not in preferred serialization');
   }
   return new Uint8Array(inner);
+}
+
+/** Whether this implementation can decrypt the advertised algorithm. */
+export function supportsAeadAlgorithm(algorithm) {
+  return Object.hasOwn(PARAMS, algorithm);
 }

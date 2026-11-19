@@ -1,5 +1,5 @@
 /**
- * Generate tests/fixtures/draft-08/aead_kbt.js.cbor
+ * Generate tests/fixtures/draft-09/aead_kbt.js.cbor
  *
  * The draft's issuer_cwt.cbor, presented with the Appendix C Holder key. The
  * first disclosure (501, inspector_license_number) is encrypted with the
@@ -19,7 +19,7 @@ import * as coseSign1 from '../src/cose-sign1.js';
 import * as sdCwt from '../src/sd-cwt.js';
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
-const fixtures = join(rootDir, 'tests/fixtures/draft-08');
+const fixtures = join(rootDir, 'tests/fixtures/draft-09');
 const hex = h => new Uint8Array(Buffer.from(h, 'hex'));
 
 const HOLDER_PRIVATE_KEY = {

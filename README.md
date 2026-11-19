@@ -1,5 +1,9 @@
 # SD-CWT
 
+Targets [draft-ietf-spice-sd-cwt-09](https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/09/).
+See [draft -09 migration, tests, and scope](DRAFT-09.md) and `SPEC-VERSION.json`.
+
+
 A JavaScript implementation of [Selective Disclosure CBOR Web Tokens (SD-CWT)](https://datatracker.ietf.org/doc/draft-ietf-spice-sd-cwt/).
 
 SD-CWT enables issuers to create tokens with claims that can be selectively disclosed by holders to verifiers, protecting privacy while maintaining cryptographic integrity.

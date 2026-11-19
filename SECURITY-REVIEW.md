@@ -1,5 +1,11 @@
 # Verification security review — 18 November 2026
 
+> **Correction, 19 November:** The header-172 conclusions below used -08.
+> Draft -09 moves 172 to unprotected headers; Beltram’s placement is correct.
+> See [the -09 migration and rerun](DRAFT-09.md). Historical failure counts
+> are not evidence of a -09 defect.
+
+
 Scope: `Verifier.verify`, COSE Sign1 processing, disclosure reconstruction, and
 AEAD processing. Base revision: `55b32be`; this branch also carries the preceding
 interop regression work. This is a focused source review with signed reproductions,
@@ -77,25 +83,10 @@ nonce/cti replay state, and input/resource limits. A required critical claim can
 be left undisclosed. Alternative hashes, complete claims-in-header profiles, and
 Rust's protected/unprotected header-172 difference remain separate interop work.
 
-## Spec-first follow-up
+## Current specification follow-up
 
-The accepted credential media type is `application/sd-cwt`, not
-`application/sd+cwt`. Signed positive controls cover content-format 293, the
-registered media type, and an application subtype with `+sd-cwt`; negative
-controls cover the incorrect spelling and malformed types. KBT protected
-header 15 (CWT Claims) is rejected as required by the current draft.
-
-Expanded encrypted-profile evidence: **511 passed, 20 failed, 8 blocked out of
-539 checks**. Every failure involves Rust AES-256/header-172 handling; blocked
-negative cases have a failed positive control and do not count as demonstrated
-rejections. The 261-case suite reports 259 passes and two Rust failures (header
-placement and protected AES-256 selection). The original 54 default-algorithm
-cross-pair assertions pass. Counts overlap and must not be added.
-
-These results do not establish full specification conformance or maximal
-interoperability. Remaining coverage includes complete issuance/Holder validation,
-all permitted signature/hash and confirmation-method profiles, claims split
-between payload and protected header 15, full map-key/nesting rules, and stateful
-replay/revocation. Default AES-128 interoperability does not make Rust's header
-placement conformant. No fallback reads an algorithm from unprotected header 172
-or suppresses a duplicate-header error to increase the passing count.
+See [DRAFT-09.md](DRAFT-09.md) for the pinned latest revision, corrected AEAD
+selection, new tests, and passing interop rerun. The earlier 511/539 result used
+superseded -08 expectations and is withdrawn as a claim about latest-spec
+compatibility. Protected/unprotected duplicate headers are still rejected;
+valid -09 presentations place 172 solely in the unprotected map.

@@ -1,13 +1,13 @@
 import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
- * Conformance tests against the canonical examples in draft-ietf-spice-sd-cwt-08.
+ * Conformance tests against the canonical examples in draft-ietf-spice-sd-cwt-09.
  *
  * Every other test in this suite signs and verifies with this library on both
  * sides, so it passes whenever the library is self-consistent -- including when
  * it is self-consistently wrong. These tests are the opposite: the bytes are
  * fixed by the draft, and the library has to meet them.
  *
- * Fixtures and key provenance: tests/fixtures/draft-08/README.md
+ * Fixtures and key provenance: tests/fixtures/draft-09/README.md
  */
 
 import { describe, it } from 'node:test';
@@ -20,7 +20,7 @@ import * as coseSign1 from '../src/cose-sign1.js';
 import * as sdCwt from '../src/sd-cwt.js';
 import * as cbor from 'cbor2';
 
-const FIXTURES = new URL('./fixtures/draft-08/', import.meta.url);
+const FIXTURES = new URL('./fixtures/draft-09/', import.meta.url);
 const read = name => new Uint8Array(readFileSync(new URL(name, FIXTURES)));
 const hex = h => new Uint8Array(Buffer.from(h, 'hex'));
 
@@ -36,7 +36,7 @@ const ISSUER_PUBLIC_KEY = {
 const AUDIENCE = 'https://verifier.example/app';
 const CNONCE = hex('8c0f5f523b95bea44a9a48c649240803');
 
-describe('draft-ietf-spice-sd-cwt-08 canonical examples', () => {
+describe('draft-ietf-spice-sd-cwt-09 canonical examples', () => {
 
   describe('issuer_cwt.cbor', () => {
 
