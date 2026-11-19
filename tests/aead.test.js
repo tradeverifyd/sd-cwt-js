@@ -1,6 +1,6 @@
 import { presentFixture, verifyFixture } from './fixture-clock.js';
 /**
- * AEAD encrypted disclosures (draft-ietf-spice-sd-cwt-08, Section 13).
+ * AEAD encrypted disclosures (draft-ietf-spice-sd-cwt-09, Section 13).
  *
  * The draft vector pins the plaintext: it is the CBOR encoding of
  * `bstr .cbor salted-entry`, bstr header included -- the same bytes the
@@ -24,7 +24,7 @@ import {
 import * as coseSign1 from '../src/cose-sign1.js';
 import * as sdCwt from '../src/sd-cwt.js';
 
-const FIXTURES = new URL('./fixtures/draft-08/', import.meta.url);
+const FIXTURES = new URL('./fixtures/draft-09/', import.meta.url);
 const read = name => new Uint8Array(readFileSync(new URL(name, FIXTURES)));
 const hex = h => new Uint8Array(Buffer.from(h, 'hex'));
 const toHex = b => Buffer.from(b).toString('hex');
@@ -437,4 +437,66 @@ describe('authenticated malformed plaintext and AAD', () => {
     const ciphertext = new Uint8Array(Buffer.concat([cipher.update(wrapped), cipher.final()]));
     await assert.rejects(() => decryptDisclosure([nonce, ciphertext, new Uint8Array(cipher.getAuthTag())], AEAD_KEY));
   });
+});
+
+
+describe('draft-09 algorithm selection and forwarding', () => {
+  for (const [algorithm, size] of [[1,16], [2,32], [29,32]]) {
+    it(`Holder chooses algorithm ${algorithm} without changing issuer-signed bytes`, async () => {
+      const key = Uint8Array.from({length:size}, (_,i) => i);
+      const token = await present({aeadAlgorithm:algorithm,
+        encryptedDisclosures:[{disclosure:FIRST_DISCLOSURE,key}]});
+      const inner = coseSign1.getHeaders(token).protectedHeaders.get(13).contents;
+      const original = cbor.decode(ISSUED, sdCwt.cborDecodeOptions).contents;
+      assert.strictEqual(cbor.decode(inner[0], sdCwt.cborDecodeOptions).has(172), false);
+      assert.strictEqual(inner[1].get(172), algorithm);
+      for (const i of [0,2,3]) assert.strictEqual(toHex(inner[i]), toHex(original[i]));
+      const {claims} = await verifyFixture({presentation:token, issuerPublicKey:ISSUER_PUBLIC_KEY,
+        expectedAudience:AUDIENCE, aeadKeyResolver:keyFor(key)});
+      assert.strictEqual(claims.get(501), 'ABCD-123456');
+    });
+  }
+  for (const algorithm of [-1,65536,true,1.5,'2',3,14,28]) {
+    it(`rejects invalid algorithm id ${JSON.stringify(algorithm)}`, async () => {
+      const good = await present({encryptedDisclosures:[{disclosure:FIRST_DISCLOSURE,key:AEAD_KEY}]});
+      const bad = await withSdCwtUnprotected(good,h => h.set(172,algorithm));
+      await assert.rejects(() => verifyFixture({presentation:bad, issuerPublicKey:ISSUER_PUBLIC_KEY,
+        expectedAudience:AUDIENCE}), /sd_aead must be a uint|forbidden/);
+    });
+  }
+  it('keeps unsupported algorithms opaque without invoking key resolution', async () => {
+    const good = await present({encryptedDisclosures:[{disclosure:FIRST_DISCLOSURE,key:AEAD_KEY}]});
+    const token = await withSdCwtUnprotected(good,h => h.set(172,15));
+    const {claims,undecryptedDisclosures} = await verifyFixture({presentation:token,
+      issuerPublicKey:ISSUER_PUBLIC_KEY,expectedAudience:AUDIENCE,
+      aeadKeyResolver:() => assert.fail('unsupported algorithm invoked resolver')});
+    assert.strictEqual(claims.has(501), false);
+    assert.strictEqual(undecryptedDisclosures.length, 1);
+  });
+  it('supports selecting a key by nonce', async () => {
+    const token = await present({encryptedDisclosures:[{disclosure:FIRST_DISCLOSURE,key:AEAD_KEY}]});
+    const entry = coseSign1.getHeaders(token).protectedHeaders.get(13).contents[1].get(171)[0];
+    const keys = new Map([[toHex(entry[0]),AEAD_KEY]]);
+    const {claims} = await verifyFixture({presentation:token,issuerPublicKey:ISSUER_PUBLIC_KEY,
+      expectedAudience:AUDIENCE,aeadKeyResolver:({entry,algorithm}) => {
+        assert.strictEqual(algorithm,1); return keys.get(toHex(entry[0]));
+      }});
+    assert.strictEqual(claims.get(501),'ABCD-123456');
+  });
+});
+
+for (const withKey of [false,true]) {
+  it(`verifies native Rust draft-09 AES-256 fixture with key=${withKey}`, async () => {
+    const {claims} = await verifyFixture({presentation:read('aes256_aead.rust.cbor'),
+      issuerPublicKey:ISSUER_PUBLIC_KEY,expectedAudience:AUDIENCE,
+      aeadKeyResolver:withKey ? keyFor(Uint8Array.from({length:32},(_,i)=>i)) : undefined});
+    assert.strictEqual(claims.has(501),withKey);
+    assert.strictEqual(claims.get(503).has('region'),withKey);
+    assert.deepStrictEqual(claims.get(502),withKey ? [1549560720,1612560720,1674004740] : [1674004740]);
+  });
+}
+
+it('matches the published draft-09 first-disclosure digest', () => {
+  assert.strictEqual(toHex(sdCwt.hashDisclosure(FIRST_DISCLOSURE)),
+    'af375dc3fba1d082448642c00be7b2f7bb05c9d8fb61cfc230ddfdfb4616a693');
 });

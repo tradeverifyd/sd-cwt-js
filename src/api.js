@@ -251,10 +251,11 @@ export const Holder = {
    * @param {Array<{disclosure: Uint8Array, key: Uint8Array, keyContext?: number|string|Uint8Array, nonce?: Uint8Array}>} [options.encryptedDisclosures]
    *   Disclosures to present encrypted, in `sd_aead_encrypted_claims` (171), per spec Section 13.
    *   Any of these that also appear in selectedDisclosures are sent only in encrypted form.
-   *   The AEAD algorithm is the SD-CWT's `sd_aead` (172) protected header, or AES-128-GCM.
+   *   The Holder chooses aeadAlgorithm; it is carried in unprotected header 172 (draft-09).
+   * @param {number} [options.aeadAlgorithm] - Holder-selected IANA AEAD id (unprotected 172).
    * @returns {Promise<Buffer>} The signed SD-KBT presentation
    */
-  async present({ token, selectedDisclosures = [], holderPrivateKey, audience, nonce, algorithm = 'ES256', encryptedDisclosures = [], issuedAt = Math.floor(Date.now() / 1000) }) {
+  async present({ token, selectedDisclosures = [], holderPrivateKey, audience, nonce, algorithm = 'ES256', encryptedDisclosures = [], aeadAlgorithm: requestedAeadAlgorithm, issuedAt = Math.floor(Date.now() / 1000) }) {
     if (!audience) {
       throw new Error('audience (aud) is REQUIRED in SD-KBT per spec Section 8.1');
     }
@@ -278,7 +279,10 @@ export const Holder = {
     // We need to re-encode the SD-CWT with disclosures in the unprotected header
     // Section 13: the Holder MAY encrypt some disclosures, omitting their
     // plaintext from sd_claims and adding them to sd_aead_encrypted_claims.
-    const aeadAlgorithm = aead.aeadAlgorithmFromHeaders(coseSign1.getHeaders(tokenBytes).protectedHeaders);
+    const headers = coseSign1.getHeaders(tokenBytes);
+    if (headers.protectedHeaders.has(172)) throw new Error('draft-09 sd_aead must be in unprotected headers');
+    const aeadAlgorithm = aead.aeadAlgorithmFromHeaders(requestedAeadAlgorithm === undefined
+      ? headers.unprotectedHeaders : new Map([[172, requestedAeadAlgorithm]]));
     const encryptedEntries = [];
     const encryptedHex = new Set();
     for (const { disclosure, key, keyContext, nonce: aeadNonce } of encryptedDisclosures) {
@@ -288,7 +292,7 @@ export const Holder = {
     }
     const plaintextDisclosures = disclosureBytes.filter(d => !encryptedHex.has(Buffer.from(d).toString('hex')));
 
-    const sdCwtWithDisclosures = embedDisclosuresInToken(tokenBytes, plaintextDisclosures, encryptedEntries);
+    const sdCwtWithDisclosures = embedDisclosuresInToken(tokenBytes, plaintextDisclosures, encryptedEntries, aeadAlgorithm);
 
     // Build SD-KBT payload per spec Section 8.1
     // REQUIRED: aud (3), iat (6)
@@ -385,7 +389,7 @@ function copyBytes(data) {
   return data;
 }
 
-function embedDisclosuresInToken(token, disclosures, encryptedEntries = []) {
+function embedDisclosuresInToken(token, disclosures, encryptedEntries = [], aeadAlgorithm) {
   // Decode the COSE_Sign1 structure
   const decoded = cbor.decode(token, sdCwt.cborDecodeOptions);
   const coseArray = decoded.contents || decoded;
@@ -411,6 +415,7 @@ function embedDisclosuresInToken(token, disclosures, encryptedEntries = []) {
   // The same rule applies to sd_aead_encrypted_claims (Section 9 step 2).
   if (encryptedEntries.length > 0) {
     newUnprotected.set(sdCwt.HeaderParam.SdAeadEncryptedClaims, encryptedEntries);
+    newUnprotected.set(sdCwt.HeaderParam.SdAead, aeadAlgorithm);
   } else {
     newUnprotected.delete(sdCwt.HeaderParam.SdAeadEncryptedClaims);
   }
@@ -790,6 +795,8 @@ export const Verifier = {
  * @returns {Promise<{decryptedDisclosures: Uint8Array[], undecryptedDisclosures: Array[]}>}
  */
 async function decryptAeadDisclosures(sdCwtHeaders, aeadKeyResolver) {
+  if (sdCwtHeaders.protectedHeaders.has(172)) throw new Error('draft-09 sd_aead must be in unprotected headers');
+  const algorithm = aead.aeadAlgorithmFromHeaders(sdCwtHeaders.unprotectedHeaders);
   const entries = sdCwtHeaders.unprotectedHeaders.get(sdCwt.HeaderParam.SdAeadEncryptedClaims);
   const decryptedDisclosures = [];
   const undecryptedDisclosures = [];
@@ -800,9 +807,12 @@ async function decryptAeadDisclosures(sdCwtHeaders, aeadKeyResolver) {
     throw new Error('Invalid SD-CWT: sd_aead_encrypted_claims (171) must be an array');
   }
 
-  const algorithm = aead.aeadAlgorithmFromHeaders(sdCwtHeaders.protectedHeaders);
   for (const entry of entries) {
     const { keyContext } = aead.parseEncryptedDisclosure(entry, algorithm);
+    if (!aead.supportsAeadAlgorithm(algorithm)) {
+      undecryptedDisclosures.push(entry);
+      continue; // draft-09 section 9: unsupported algorithms remain opaque
+    }
     const resolved = aeadKeyResolver ? await aeadKeyResolver({ keyContext, entry, algorithm }) : undefined;
     const keys = resolved === undefined || resolved === null ? [] : (Array.isArray(resolved) ? resolved : [resolved]);
     if (keys.length === 0) {
